@@ -23,17 +23,20 @@ public class NetworkTest {
         // 2. Check strict HTTP connection
         try {
             System.out.println(">>> 3. Testing HTTPS Handshake (Java 21 Client)...");
-            HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(10))
-                    .followRedirects(HttpClient.Redirect.NORMAL)
-                    .build();
+            HttpClient client =
+                    HttpClient.newBuilder()
+                            .connectTimeout(Duration.ofSeconds(10))
+                            .followRedirects(HttpClient.Redirect.NORMAL)
+                            .build();
 
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("https://api.anthropic.com")) // Base URL check
-                    .GET()
-                    .build();
+            HttpRequest request =
+                    HttpRequest.newBuilder()
+                            .uri(URI.create("https://api.anthropic.com")) // Base URL check
+                            .GET()
+                            .build();
 
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response =
+                    client.send(request, HttpResponse.BodyHandlers.ofString());
             System.out.println("   Success: Connected! Status Code: " + response.statusCode());
         } catch (Exception e) {
             System.out.println("   FAILURE: Connection blocked.");

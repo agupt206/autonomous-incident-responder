@@ -9,5 +9,4 @@ public class AutonomousIncidentResponderApplication {
     public static void main(String[] args) {
         SpringApplication.run(AutonomousIncidentResponderApplication.class, args);
     }
-
 }
