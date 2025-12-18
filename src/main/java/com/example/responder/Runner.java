@@ -11,11 +11,15 @@ import org.springframework.context.annotation.Profile;
 public class Runner {
 
     @Bean
-    ApplicationRunner testConnection(SreAgentService agent) {
+    ApplicationRunner runAnalysis(SreAgentService agent) {
         return args -> {
-            System.out.println(">>> Testing AI Connection...");
-            String response = agent.analyze("ERROR 500: Connection refused at /payment-gateway");
-            System.out.println(">>> AI Response: " + response);
+            System.out.println(">>> Sending Log to SRE Agent...");
+
+            // The Task: "ERROR: Connection refused at /payment-gateway"
+            String response = agent.analyzeLog("ERROR: Connection refused at /payment-gateway");
+
+            System.out.println(">>> SRE Agent Analysis:");
+            System.out.println(response);
         };
     }
 }
