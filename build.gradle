@@ -32,6 +32,13 @@ dependencies {
     // The Anthropic Starter (Claude)
     implementation 'org.springframework.ai:spring-ai-anthropic-spring-boot-starter'
 
+    implementation 'org.springframework.ai:spring-ai-transformers-spring-boot-starter'
+
+    // Add the specific store dependency without specifying the version
+    implementation 'org.springframework.ai:spring-ai-elasticsearch-store'
+    implementation 'org.springframework.boot:spring-boot-starter-data-elasticsearch'
+
+
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
 
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
