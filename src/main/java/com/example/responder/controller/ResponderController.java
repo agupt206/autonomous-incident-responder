@@ -13,7 +13,8 @@ public class ResponderController {
     private final SreAgentService agentService;
     private final SystemStateService systemStateService;
 
-    public ResponderController(SreAgentService agentService, SystemStateService systemStateService) {
+    public ResponderController(
+            SreAgentService agentService, SystemStateService systemStateService) {
         this.agentService = agentService;
         this.systemStateService = systemStateService;
     }

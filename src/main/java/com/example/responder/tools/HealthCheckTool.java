@@ -1,11 +1,12 @@
 package com.example.responder.tools;
 
 import com.example.responder.service.SystemStateService; // Import this
+import java.util.function.Function;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import java.util.function.Function;
 
-public class HealthCheckTool implements Function<HealthCheckTool.Request, HealthCheckTool.Response> {
+public class HealthCheckTool
+        implements Function<HealthCheckTool.Request, HealthCheckTool.Response> {
 
     private static final Logger log = LoggerFactory.getLogger(HealthCheckTool.class);
     private final SystemStateService systemState; // Add dependency
@@ -16,6 +17,7 @@ public class HealthCheckTool implements Function<HealthCheckTool.Request, Health
     }
 
     public record Request(String serviceName) {}
+
     public record Response(String status, String logs) {}
 
     @Override
@@ -26,7 +28,8 @@ public class HealthCheckTool implements Function<HealthCheckTool.Request, Health
 
         if (!isUp) {
             // Simulate a realistic crash log
-            return new Response("DOWN", "CRITICAL: Connection Refused. CPU 99%. OOMKilled event detected.");
+            return new Response(
+                    "DOWN", "CRITICAL: Connection Refused. CPU 99%. OOMKilled event detected.");
         }
 
         return new Response("UP", "Service is healthy. Latency: 45ms. 200 OK.");

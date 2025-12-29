@@ -50,32 +50,36 @@ public class SreAgentService {
         long aiStartTime = System.currentTimeMillis();
 
         AnalysisResponse response =
-                this.chatClient.prompt()
-                        .user(u -> u.text("""
+                this.chatClient
+                        .prompt()
+                        .user(
+                                u ->
+                                        u.text(
+                                                        """
                     You are a Senior SRE. Analyze the issue using the provided RUNBOOKS and TOOLS.
-                    
+
                     ISSUE: {issue}
                     SERVICE: {service}
                     RUNBOOKS: {context}
-                    
+
                     INSTRUCTIONS:
                     1. If the issue is a question (e.g. "Is it up?"), USE THE TOOL to check status.
                     2. Incorporate the tool's findings into your root cause hypothesis.
-                    
+
                     *** CRITICAL PRIORITY RULES: ***
                     1. If the tool reports "DOWN", 'requiresEscalation' is TRUE.
                     2. If the tool reports "UP":
                        - AND the 'issue' is a generic question (e.g. "Is the system up?"), then ignore runbooks and say "No action required".
                        - BUT IF the 'issue' contains specific error logs (e.g. "401", "Timeout", "Latency"), you MUST analyze the runbooks to find the fix.
-                    
+
                     RULES FOR OUTPUT:
                     1. 'suggestedSteps': CLI commands only.
                     2. 'rootCauseHypothesis': Mention the tool's result.
                     3. 'requiresEscalation': True only if tool reports "DOWN".
                     """)
-                                .param("service", request.serviceName())
-                                .param("issue", request.issue())
-                                .param("context", context))
+                                                .param("service", request.serviceName())
+                                                .param("issue", request.issue())
+                                                .param("context", context))
                         .tools("healthCheck")
                         .call()
                         .entity(AnalysisResponse.class);

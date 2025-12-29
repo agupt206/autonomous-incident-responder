@@ -1,8 +1,8 @@
 package com.example.responder.service;
 
-import org.springframework.stereotype.Service;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.stereotype.Service;
 
 @Service
 public class SystemStateService {

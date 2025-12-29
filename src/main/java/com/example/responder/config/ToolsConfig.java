@@ -12,7 +12,8 @@ public class ToolsConfig {
 
     @Bean
     @Description("Check real-time health...")
-    public Function<HealthCheckTool.Request, HealthCheckTool.Response> healthCheck(SystemStateService systemState) {
+    public Function<HealthCheckTool.Request, HealthCheckTool.Response> healthCheck(
+            SystemStateService systemState) {
         return new HealthCheckTool(systemState); // Pass the service here
     }
 }
