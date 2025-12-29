@@ -24,6 +24,7 @@ public class VectorStoreConfig {
 
         var options = new ElasticsearchVectorStoreOptions();
         options.setIndexName("es-runbk-local");
+        options.setDimensions(384);
 
         // Options: Define index name and force creation if missing
         return ElasticsearchVectorStore.builder(restClient, embeddingModel)
