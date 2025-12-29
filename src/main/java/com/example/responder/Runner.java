@@ -18,7 +18,11 @@ public class Runner {
             try {
                 ingestion.ingestRunbooks();
             } catch (Exception e) {
-                System.err.println(">>> CRITICAL: Ingestion failed. Please check your Vector Store (Elasticsearch) state.\nError: " + e.getMessage());
+                System.err.println(
+                        ">>> CRITICAL: Ingestion failed. Please check your Vector Store"
+                                + " (Elasticsearch) state.\n"
+                                + "Error: "
+                                + e.getMessage());
                 return;
             }
 
