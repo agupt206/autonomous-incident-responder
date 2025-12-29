@@ -1,5 +1,6 @@
 package com.example.responder;
 
+import com.example.responder.model.IncidentRequest;
 import com.example.responder.service.IngestionService;
 import com.example.responder.service.SreAgentService;
 import org.springframework.boot.ApplicationRunner;
@@ -8,7 +9,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 
 @Configuration
-@Profile("!test")
+@Profile("cli")
 public class Runner {
 
     @Bean
@@ -28,7 +29,10 @@ public class Runner {
 
             // Step 2: Test the knowledge
             System.out.println("\n>>> Asking AI about 'Connection Refused'...");
-            String response = agent.analyzeLog("ERROR: Connection refused at /payment-gateway");
+            var testIncidentRequest =
+                    new IncidentRequest(
+                            "payment-gateway", "ERROR: ECONNREFUSED at /payment-gateway");
+            var response = agent.analyze(testIncidentRequest);
 
             System.out.println("\n>>> AI RESPONSE:");
             System.out.println(response);
