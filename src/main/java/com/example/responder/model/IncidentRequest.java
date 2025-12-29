@@ -1,3 +1,3 @@
 package com.example.responder.model;
 
-public record IncidentRequest(String serviceName, String errorLog) {}
+public record IncidentRequest(String serviceName, String issue) {}
