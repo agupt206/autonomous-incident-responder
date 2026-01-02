@@ -8,7 +8,7 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver; // Import 1
-import org.springframework.core.io.support.ResourcePatternResolver;           // Import 2
+import org.springframework.core.io.support.ResourcePatternResolver; // Import 2
 import org.springframework.stereotype.Component;
 
 @Component
