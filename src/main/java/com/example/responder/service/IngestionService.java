@@ -1,44 +1,44 @@
 package com.example.responder.service;
 
-import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.document.Document; // Verify import
 import org.springframework.ai.reader.TextReader;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
 import org.springframework.ai.vectorstore.VectorStore;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.CommandLineRunner;
 import org.springframework.core.io.Resource;
-import org.springframework.stereotype.Service;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver; // Import 1
+import org.springframework.core.io.support.ResourcePatternResolver;           // Import 2
+import org.springframework.stereotype.Component;
 
-@Service
-public class IngestionService {
+@Component
+public class IngestionService implements CommandLineRunner {
 
     private static final Logger log = LoggerFactory.getLogger(IngestionService.class);
     private final VectorStore vectorStore;
-
-    // Load the file we just created
-    @Value("classpath:runbooks/payment-gateway.txt")
-    private Resource runbookResource;
 
     public IngestionService(VectorStore vectorStore) {
         this.vectorStore = vectorStore;
     }
 
-    public void ingestRunbooks() {
-        log.info(">>> Loading Runbooks into Vector Store...");
+    @Override
+    public void run(String... args) throws Exception {
+        // 1. Use a Pattern Resolver to find ALL .txt files
+        ResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
+        Resource[] resources = resolver.getResources("classpath:runbooks/*.txt");
 
-        // 1. Read the file
-        TextReader textReader = new TextReader(runbookResource);
-        List<Document> documents = textReader.get();
+        for (Resource resource : resources) {
+            log.info(">>> Processing Runbook: {}", resource.getFilename());
 
-        // 2. Split into chunks (AI can't read whole books at once)
-        TokenTextSplitter splitter = new TokenTextSplitter();
-        List<Document> splitDocuments = splitter.apply(documents);
+            // 2. Read and Split
+            var textReader = new TextReader(resource);
+            var splitter = new TokenTextSplitter();
+            var documents = splitter.apply(textReader.get());
 
-        // 3. Store in Elasticsearch
-        vectorStore.add(splitDocuments);
-
-        log.info(">>> Ingestion Complete! Added {} documents.", splitDocuments.size());
+            // 3. Store in Elasticsearch
+            vectorStore.accept(documents);
+            log.info(">>> Ingested {} documents from {}", documents.size(), resource.getFilename());
+        }
+        log.info(">>> Global Ingestion Complete!");
     }
 }

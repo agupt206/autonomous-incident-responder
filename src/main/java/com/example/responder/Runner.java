@@ -17,7 +17,7 @@ public class Runner {
         return args -> {
             // Step 1: Teach the AI (Ingest)
             try {
-                ingestion.ingestRunbooks();
+                ingestion.run();
             } catch (Exception e) {
                 System.err.println(
                         ">>> CRITICAL: Ingestion failed. Please check your Vector Store"
