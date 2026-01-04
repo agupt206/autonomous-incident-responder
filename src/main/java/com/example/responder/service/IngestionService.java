@@ -41,7 +41,7 @@ public class IngestionService implements CommandLineRunner {
                             .withIncludeCodeBlock(
                                     true) // CRITICAL: Keep Lucene queries inside the text
                             // TODO: uncomment after implementing RAG eval
-                            //.withAdditionalMetadata("filename", resource.getFilename())
+                            // .withAdditionalMetadata("filename", resource.getFilename())
                             .build();
 
             // 2. Read and Parse

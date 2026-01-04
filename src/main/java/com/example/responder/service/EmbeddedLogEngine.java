@@ -31,9 +31,7 @@ public class EmbeddedLogEngine {
         loadScenario("healthy");
     }
 
-    /**
-     * Wipes the existing index and seeds new data based on the requested simulation scenario.
-     */
+    /** Wipes the existing index and seeds new data based on the requested simulation scenario. */
     public void loadScenario(String scenarioName) {
         log.info(">>> SIMULATION: Switching Log Engine to Scenario: '{}'", scenarioName);
 
@@ -45,11 +43,11 @@ public class EmbeddedLogEngine {
             switch (scenarioName.toLowerCase()) {
                 case "healthy" -> seedHealthy(writer);
 
-                // --- Payment Scenarios ---
+                    // --- Payment Scenarios ---
                 case "payment-500-npe" -> seedPaymentNPE(writer);
                 case "payment-latency" -> seedPaymentLatency(writer);
 
-                // --- Inventory Scenarios ---
+                    // --- Inventory Scenarios ---
                 case "inventory-db-timeout" -> seedInventoryDbTimeout(writer);
                 case "inventory-stock-mismatch" -> seedInventoryStockMismatch(writer);
 
@@ -66,15 +64,36 @@ public class EmbeddedLogEngine {
     // --- Scenario Data Factories ---
 
     private void seedHealthy(IndexWriter w) throws IOException {
-        addLog(w, "payment-service", "INFO", "200", "opentracing-log", "tx-ok-1", "Payment processed successfully");
-        addLog(w, "inventory-service", "INFO", "200", "opentracing-log", "tx-ok-2", "Stock updated");
+        addLog(
+                w,
+                "payment-service",
+                "INFO",
+                "200",
+                "opentracing-log",
+                "tx-ok-1",
+                "Payment processed successfully");
+        addLog(
+                w,
+                "inventory-service",
+                "INFO",
+                "200",
+                "opentracing-log",
+                "tx-ok-2",
+                "Stock updated");
     }
 
     private void seedPaymentNPE(IndexWriter w) throws IOException {
         // Matches: status_code:[500 TO 599] AND log.level:ERROR
         for (int i = 0; i < 50; i++) {
-            addLog(w, "payment-service", "ERROR", "500", "opentracing-log", "trace-npe-" + i,
-                    "java.lang.NullPointerException at com.example.payment.Processor.process(Processor.java:42)");
+            addLog(
+                    w,
+                    "payment-service",
+                    "ERROR",
+                    "500",
+                    "opentracing-log",
+                    "trace-npe-" + i,
+                    "java.lang.NullPointerException at"
+                            + " com.example.payment.Processor.process(Processor.java:42)");
         }
     }
 
@@ -86,7 +105,11 @@ public class EmbeddedLogEngine {
             Document doc = new Document();
             doc.add(new TextField("application.name", "payment-service", Field.Store.YES));
             doc.add(new StringField("metric", "latency", Field.Store.YES));
-            doc.add(new StringField("value", "5000", Field.Store.YES)); // Simple string match for simulation
+            doc.add(
+                    new StringField(
+                            "value",
+                            "5000",
+                            Field.Store.YES)); // Simple string match for simulation
             doc.add(new StoredField("trace_id", "slow-tx-" + i));
             w.addDocument(doc);
         }
@@ -98,7 +121,11 @@ public class EmbeddedLogEngine {
             Document doc = new Document();
             doc.add(new TextField("application.name", "inventory-service", Field.Store.YES));
             doc.add(new StringField("db.type", "postgres", Field.Store.YES));
-            doc.add(new TextField("log.message", "Connection check failed. HikariPool-1 - Connection is not available", Field.Store.YES));
+            doc.add(
+                    new TextField(
+                            "log.message",
+                            "Connection check failed. HikariPool-1 - Connection is not available",
+                            Field.Store.YES));
             doc.add(new StoredField("trace_id", "db-err-" + i));
             w.addDocument(doc);
         }
@@ -107,12 +134,26 @@ public class EmbeddedLogEngine {
     private void seedInventoryStockMismatch(IndexWriter w) throws IOException {
         // Matches: status_code:[500 TO 599] ... and specifically "StockCountMismatch"
         for (int i = 0; i < 5; i++) {
-            addLog(w, "inventory-service", "ERROR", "500", "opentracing-log", "stock-err-" + i,
+            addLog(
+                    w,
+                    "inventory-service",
+                    "ERROR",
+                    "500",
+                    "opentracing-log",
+                    "stock-err-" + i,
                     "CRITICAL: StockCountMismatchException: SKU-123 expected 5 but found 3");
         }
     }
 
-    private void addLog(IndexWriter w, String app, String level, String status, String type, String traceId, String message) throws IOException {
+    private void addLog(
+            IndexWriter w,
+            String app,
+            String level,
+            String status,
+            String type,
+            String traceId,
+            String message)
+            throws IOException {
         Document doc = new Document();
         doc.add(new TextField("application.name", app, Field.Store.YES));
         doc.add(new StringField("log.level", level, Field.Store.YES));
@@ -147,7 +188,8 @@ public class EmbeddedLogEngine {
             }
         } catch (Exception e) {
             log.error("Lucene Query Failed", e);
-            return new ElfLogSearchTool.Response(0, List.of(), List.of(), "Query Error: " + e.getMessage());
+            return new ElfLogSearchTool.Response(
+                    0, List.of(), List.of(), "Query Error: " + e.getMessage());
         }
     }
 }

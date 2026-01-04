@@ -37,7 +37,7 @@ public class SreAgentService {
         // We filter by 'service_name' metadata to ensure we only get the correct Runbook.
         // This prevents the "Inventory" runbook from polluting the "Payment" analysis.
         // TODO: uncomment after implementing RAG eval
-        //String serviceKey = request.serviceName().toLowerCase().replace(" ", "-");
+        // String serviceKey = request.serviceName().toLowerCase().replace(" ", "-");
         // String safeIssue = safeTruncate(request.issue(), 100);
 
         SearchRequest searchRequest =
@@ -45,7 +45,7 @@ public class SreAgentService {
                         .query(request.issue())
                         .topK(2)
                         // TODO: uncomment after implementing RAG eval
-                        //.filterExpression("service_name == '" + serviceKey + "'")
+                        // .filterExpression("service_name == '" + serviceKey + "'")
                         .build();
 
         List<Document> similarDocuments = vectorStore.similaritySearch(searchRequest);

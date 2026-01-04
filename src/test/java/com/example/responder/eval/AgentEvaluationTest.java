@@ -70,7 +70,8 @@ public class AgentEvaluationTest {
         System.out.println("---------------------------------------------------");
 
         // 1. DYNAMIC SETUP: Set the world state to match the test case
-        String scenarioId = mapAlertToScenario(testCase.serviceName(), testCase.expectedAlertHeader());
+        String scenarioId =
+                mapAlertToScenario(testCase.serviceName(), testCase.expectedAlertHeader());
         System.out.println("   -> Loading Simulation Scenario: " + scenarioId);
         logEngine.loadScenario(scenarioId);
 
@@ -157,29 +158,35 @@ public class AgentEvaluationTest {
         String formattedGroundTruth = String.join("\n", testCase.expectedRemediation());
         String formattedActualSteps = String.join("\n", response.remediationSteps());
 
-        var result = judge.prompt()
-                .system("You are a strict QA Auditor. Your goal is to detect Hallucinations.")
-                .user(u -> u.text("""
+        var result =
+                judge.prompt()
+                        .system(
+                                "You are a strict QA Auditor. Your goal is to detect"
+                                        + " Hallucinations.")
+                        .user(
+                                u ->
+                                        u.text(
+                                                        """
                     TASK: Check if the 'Agent Output' is faithful to the 'Ground Truth'.
-                    
+
                     GROUND TRUTH (Source of Truth):
                     {groundTruth}
-                    
+
                     AGENT OUTPUT (Generated Plan):
                     {actualSteps}
-                    
+
                     EVALUATION RULES:
                     1. PASS (true): If the Agent's steps are semantically present in the Ground Truth.
                        - Minor phrasing changes are OK (e.g. "Check Health" vs "Verify Health Status").
                        - Omissions are OK (e.g. if the Agent missed a step, it is NOT a hallucination).
-                    
+
                     2. FAIL (false): If the Agent INVENTED a step or advice not found in the Ground Truth.
                        - Example: Suggesting "Restart Database" when the text only says "Check Logs".
                     """)
-                        .param("groundTruth", formattedGroundTruth)
-                        .param("actualSteps", formattedActualSteps))
-                .call()
-                .entity(GradingResult.class);
+                                                .param("groundTruth", formattedGroundTruth)
+                                                .param("actualSteps", formattedActualSteps))
+                        .call()
+                        .entity(GradingResult.class);
 
         if (!result.pass()) {
             System.out.println("❌ FAITHFULNESS FAIL: " + result.reasoning());
@@ -198,15 +205,15 @@ public class AgentEvaluationTest {
 
         // Simple heuristic mapping based on your Runbook headers
         return switch (key) {
-            // Payment Service
+                // Payment Service
             case "payment-service::Elevated 5xx Error Rate" -> "payment-500-npe";
             case "payment-service::Upstream Gateway Latency" -> "payment-latency";
 
-            // Inventory Service
+                // Inventory Service
             case "inventory-service::Database Connection Timeout" -> "inventory-db-timeout";
             case "inventory-service::Elevated 5xx Error Rate" -> "inventory-stock-mismatch";
 
-            // Default / Fallback
+                // Default / Fallback
             default -> "healthy";
         };
     }
