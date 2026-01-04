@@ -1,6 +1,6 @@
 package com.example.responder.service;
 
-import com.example.responder.tools.ElfLogSearchTool; // We will create this in Step 5
+import com.example.responder.tools.ElfLogSearchTool;
 import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -27,101 +27,127 @@ public class EmbeddedLogEngine {
     public void init() throws IOException {
         memoryIndex = new ByteBuffersDirectory();
         analyzer = new WhitespaceAnalyzer();
-
-        IndexWriterConfig indexWriterConfig = new IndexWriterConfig(analyzer);
-        IndexWriter writer = new IndexWriter(memoryIndex, indexWriterConfig);
-
-        // Seed Data: 1 Healthy Log
-        addLog(
-                writer,
-                "payment-service",
-                "INFO",
-                "200",
-                "opentracing-log",
-                "tx-ok-1",
-                "Transaction processed successfully");
-
-        // Seed Data: 3 Broken Logs (Matching the Runbook criteria)
-        addLog(
-                writer,
-                "payment-service",
-                "ERROR",
-                "500",
-                "opentracing-log",
-                "elf-700-1",
-                "Connection timed out");
-        addLog(
-                writer,
-                "payment-service",
-                "ERROR",
-                "502",
-                "opentracing-log",
-                "elf-700-2",
-                "Bad Gateway");
-        // addLog(writer, "payment-service", "ERROR", "500", "opentracing-log", "elf-700-3",
-        // "NullPointerException in processing");
-        addLog(
-                writer,
-                "payment-service",
-                "ERROR",
-                "500",
-                "opentracing-log",
-                "elf-700-4",
-                "PaymentDeclinedException: Insufficient funds");
-
-        // addLog(writer, "inventory-service", "ERROR", "500", "opentracing-log", "elf-888");
-
-        writer.close();
-        log.info(">>> Embedded Lucene Index initialized with seed data.");
+        // Start with a healthy state
+        loadScenario("healthy");
     }
 
-    private void addLog(
-            IndexWriter w,
-            String app,
-            String level,
-            String status,
-            String type,
-            String traceId,
-            String message)
-            throws IOException {
+    /**
+     * Wipes the existing index and seeds new data based on the requested simulation scenario.
+     */
+    public void loadScenario(String scenarioName) {
+        log.info(">>> SIMULATION: Switching Log Engine to Scenario: '{}'", scenarioName);
+
+        try (IndexWriter writer = new IndexWriter(memoryIndex, new IndexWriterConfig(analyzer))) {
+            // 1. Clear existing data
+            writer.deleteAll();
+
+            // 2. Seed new data based on scenario
+            switch (scenarioName.toLowerCase()) {
+                case "healthy" -> seedHealthy(writer);
+
+                // --- Payment Scenarios ---
+                case "payment-500-npe" -> seedPaymentNPE(writer);
+                case "payment-latency" -> seedPaymentLatency(writer);
+
+                // --- Inventory Scenarios ---
+                case "inventory-db-timeout" -> seedInventoryDbTimeout(writer);
+                case "inventory-stock-mismatch" -> seedInventoryStockMismatch(writer);
+
+                default -> log.warn("Unknown scenario '{}', leaving index empty.", scenarioName);
+            }
+
+            writer.commit(); // Ensure changes are visible to readers
+
+        } catch (IOException e) {
+            log.error("Failed to load scenario", e);
+        }
+    }
+
+    // --- Scenario Data Factories ---
+
+    private void seedHealthy(IndexWriter w) throws IOException {
+        addLog(w, "payment-service", "INFO", "200", "opentracing-log", "tx-ok-1", "Payment processed successfully");
+        addLog(w, "inventory-service", "INFO", "200", "opentracing-log", "tx-ok-2", "Stock updated");
+    }
+
+    private void seedPaymentNPE(IndexWriter w) throws IOException {
+        // Matches: status_code:[500 TO 599] AND log.level:ERROR
+        for (int i = 0; i < 50; i++) {
+            addLog(w, "payment-service", "ERROR", "500", "opentracing-log", "trace-npe-" + i,
+                    "java.lang.NullPointerException at com.example.payment.Processor.process(Processor.java:42)");
+        }
+    }
+
+    private void seedPaymentLatency(IndexWriter w) throws IOException {
+        // Matches: metric:latency AND value > 2000
+        // Note: Lucene text fields require careful handling for range queries on numbers.
+        // For simplicity in this demo, we treat specific keywords or just add a log message field.
+        for (int i = 0; i < 20; i++) {
+            Document doc = new Document();
+            doc.add(new TextField("application.name", "payment-service", Field.Store.YES));
+            doc.add(new StringField("metric", "latency", Field.Store.YES));
+            doc.add(new StringField("value", "5000", Field.Store.YES)); // Simple string match for simulation
+            doc.add(new StoredField("trace_id", "slow-tx-" + i));
+            w.addDocument(doc);
+        }
+    }
+
+    private void seedInventoryDbTimeout(IndexWriter w) throws IOException {
+        // Matches: log.message:"Connection check failed" AND db.type:postgres
+        for (int i = 0; i < 15; i++) {
+            Document doc = new Document();
+            doc.add(new TextField("application.name", "inventory-service", Field.Store.YES));
+            doc.add(new StringField("db.type", "postgres", Field.Store.YES));
+            doc.add(new TextField("log.message", "Connection check failed. HikariPool-1 - Connection is not available", Field.Store.YES));
+            doc.add(new StoredField("trace_id", "db-err-" + i));
+            w.addDocument(doc);
+        }
+    }
+
+    private void seedInventoryStockMismatch(IndexWriter w) throws IOException {
+        // Matches: status_code:[500 TO 599] ... and specifically "StockCountMismatch"
+        for (int i = 0; i < 5; i++) {
+            addLog(w, "inventory-service", "ERROR", "500", "opentracing-log", "stock-err-" + i,
+                    "CRITICAL: StockCountMismatchException: SKU-123 expected 5 but found 3");
+        }
+    }
+
+    private void addLog(IndexWriter w, String app, String level, String status, String type, String traceId, String message) throws IOException {
         Document doc = new Document();
-        // TextField = analyzed (good for text), StringField = exact match only
         doc.add(new TextField("application.name", app, Field.Store.YES));
         doc.add(new StringField("log.level", level, Field.Store.YES));
         doc.add(new StringField("type", type, Field.Store.YES));
-        doc.add(new TextField("status_code", status, Field.Store.YES)); // For range queries
+        doc.add(new TextField("status_code", status, Field.Store.YES));
+        doc.add(new TextField("log.message", message, Field.Store.YES)); // Added message field
         doc.add(new StoredField("trace_id", traceId));
-        doc.add(new TextField("message", message, Field.Store.YES));
         w.addDocument(doc);
     }
 
     public ElfLogSearchTool.Response executeSearch(String queryString) {
         try {
-            IndexReader reader = DirectoryReader.open(memoryIndex);
-            IndexSearcher searcher = new IndexSearcher(reader);
+            // Always open a fresh reader to see the latest writes
+            try (IndexReader reader = DirectoryReader.open(memoryIndex)) {
+                IndexSearcher searcher = new IndexSearcher(reader);
+                QueryParser parser = new QueryParser("log.message", analyzer); // Default field
 
-            // Allow searching on the "type" field by default
-            QueryParser parser = new QueryParser("type", analyzer);
-            Query query = parser.parse(queryString);
+                Query query = parser.parse(queryString);
+                TopDocs docs = searcher.search(query, 10);
 
-            TopDocs docs = searcher.search(query, 10); // Get top 10
+                List<String> traceIds = new ArrayList<>();
+                for (ScoreDoc scoreDoc : docs.scoreDocs) {
+                    Document d = searcher.doc(scoreDoc.doc);
+                    traceIds.add(d.get("trace_id"));
+                }
 
-            List<String> traceIds = new ArrayList<>();
-            for (ScoreDoc scoreDoc : docs.scoreDocs) {
-                Document d = searcher.doc(scoreDoc.doc);
-                traceIds.add(d.get("trace_id"));
+                return new ElfLogSearchTool.Response(
+                        (int) docs.totalHits.value,
+                        traceIds,
+                        List.of("simulated-pod-1", "simulated-pod-2"),
+                        "Found " + docs.totalHits.value + " matches for query: " + queryString);
             }
-
-            return new ElfLogSearchTool.Response(
-                    (int) docs.totalHits.value,
-                    traceIds,
-                    List.of("payment-pod-a", "payment-pod-b"), // Simulated pod names
-                    "Search successful. Found " + docs.totalHits.value + " matches.");
-
         } catch (Exception e) {
             log.error("Lucene Query Failed", e);
-            return new ElfLogSearchTool.Response(
-                    0, List.of(), List.of(), "Invalid Query Syntax: " + e.getMessage());
+            return new ElfLogSearchTool.Response(0, List.of(), List.of(), "Query Error: " + e.getMessage());
         }
     }
 }

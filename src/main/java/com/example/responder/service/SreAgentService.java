@@ -37,7 +37,7 @@ public class SreAgentService {
         // We filter by 'service_name' metadata to ensure we only get the correct Runbook.
         // This prevents the "Inventory" runbook from polluting the "Payment" analysis.
         // TODO: uncomment after implementing RAG eval
-        // String serviceKey = request.serviceName().toLowerCase().replace(" ", "-");
+        //String serviceKey = request.serviceName().toLowerCase().replace(" ", "-");
         // String safeIssue = safeTruncate(request.issue(), 100);
 
         SearchRequest searchRequest =
@@ -45,7 +45,7 @@ public class SreAgentService {
                         .query(request.issue())
                         .topK(2)
                         // TODO: uncomment after implementing RAG eval
-                        // .filterExpression("service_name == '" + serviceKey + "'")
+                        //.filterExpression("service_name == '" + serviceKey + "'")
                         .build();
 
         List<Document> similarDocuments = vectorStore.similaritySearch(searchRequest);
@@ -115,7 +115,7 @@ public class SreAgentService {
                         * Key: "Trace IDs" -> Value: List from log tool.
                         * Key: "Match Count" -> Value: Number from log tool.
                         * Key: "Health Status" -> Value: Result of healthCheck tool.
-                    - 'remainingSteps': Any manual fix actions from the "Remediation" section.
+                    - 'remediationSteps': The exact list of steps found in the 'Remediation' section. Do not summarize or combine steps; extract them as individual items."
                     - 'requiresEscalation': True if the Runbook says to escalate or if severity is Critical.
                     """)
                                                 .param("service", request.serviceName())
@@ -131,7 +131,7 @@ public class SreAgentService {
                 aiGeneratedResponse.investigationQuery(),
                 aiGeneratedResponse.evidence(),
                 aiGeneratedResponse.responsibleTeam(),
-                aiGeneratedResponse.remainingSteps(),
+                aiGeneratedResponse.remediationSteps(),
                 aiGeneratedResponse.requiresEscalation(),
                 retrievedSources);
     }

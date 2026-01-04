@@ -5,6 +5,7 @@ import com.example.responder.eval.GoldenDatasetGenerator;
 import com.example.responder.eval.GradingResult; // We will define this record below if not exists
 import com.example.responder.model.AnalysisResponse;
 import com.example.responder.model.IncidentRequest;
+import com.example.responder.service.EmbeddedLogEngine;
 import com.example.responder.service.SreAgentService;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -28,6 +29,8 @@ public class AgentEvaluationTest {
     @Autowired private GoldenDatasetGenerator datasetGenerator;
 
     @Autowired private ChatClient.Builder clientBuilder;
+
+    @Autowired private EmbeddedLogEngine logEngine;
 
     // 1. DATA LOADING & GENERATION
     Stream<EvaluationCase> provideGoldenData() throws IOException {
@@ -66,12 +69,17 @@ public class AgentEvaluationTest {
         System.out.println("USER ISSUE: " + testCase.userIssue());
         System.out.println("---------------------------------------------------");
 
-        // 1. EXECUTION (Run the Agent Once)
+        // 1. DYNAMIC SETUP: Set the world state to match the test case
+        String scenarioId = mapAlertToScenario(testCase.serviceName(), testCase.expectedAlertHeader());
+        System.out.println("   -> Loading Simulation Scenario: " + scenarioId);
+        logEngine.loadScenario(scenarioId);
+
+        // 2. EXECUTION (Run the Agent Once)
         AnalysisResponse response =
                 agent.analyze(
                         new IncidentRequest(testCase.serviceName(), testCase.userIssue(), "1h"));
 
-        // 2. ASSERTION (Run all verifications independent of each other)
+        // 3. ASSERTION (Run all verifications independent of each other)
         Assertions.assertAll(
                 "Agent Performance Metrics",
                 () -> verifyRetrievalPrecision(testCase, response),
@@ -84,7 +92,7 @@ public class AgentEvaluationTest {
     private void verifyRetrievalPrecision(EvaluationCase testCase, AnalysisResponse response) {
         boolean precise =
                 response.citations().stream()
-                        .anyMatch(
+                        .allMatch(
                                 source ->
                                         source.toLowerCase()
                                                 .contains(testCase.serviceName().toLowerCase()));
@@ -145,37 +153,62 @@ public class AgentEvaluationTest {
     private void verifyPlanFaithfulness(EvaluationCase testCase, AnalysisResponse response) {
         ChatClient judge = clientBuilder.build();
 
-        var result =
-                judge.prompt()
-                        .system("You are a Safety Judge.")
-                        .user(
-                                u ->
-                                        u.text(
-                                                        """
-                        GROUND TRUTH: {groundTruth}
-                        ACTUAL STEPS: {actualSteps}
-                        Pass=true ONLY if every step in the Agent's output is supported by the Ground Truth.
-                        """)
-                                                .param(
-                                                        "groundTruth",
-                                                        testCase.expectedRemediation())
-                                                .param(
-                                                        "actualSteps",
-                                                        response.remainingSteps().toString()))
-                        .call()
-                        .entity(GradingResult.class);
+        // Join lists for easier reading by the LLM
+        String formattedGroundTruth = String.join("\n", testCase.expectedRemediation());
+        String formattedActualSteps = String.join("\n", response.remediationSteps());
+
+        var result = judge.prompt()
+                .system("You are a strict QA Auditor. Your goal is to detect Hallucinations.")
+                .user(u -> u.text("""
+                    TASK: Check if the 'Agent Output' is faithful to the 'Ground Truth'.
+                    
+                    GROUND TRUTH (Source of Truth):
+                    {groundTruth}
+                    
+                    AGENT OUTPUT (Generated Plan):
+                    {actualSteps}
+                    
+                    EVALUATION RULES:
+                    1. PASS (true): If the Agent's steps are semantically present in the Ground Truth.
+                       - Minor phrasing changes are OK (e.g. "Check Health" vs "Verify Health Status").
+                       - Omissions are OK (e.g. if the Agent missed a step, it is NOT a hallucination).
+                    
+                    2. FAIL (false): If the Agent INVENTED a step or advice not found in the Ground Truth.
+                       - Example: Suggesting "Restart Database" when the text only says "Check Logs".
+                    """)
+                        .param("groundTruth", formattedGroundTruth)
+                        .param("actualSteps", formattedActualSteps))
+                .call()
+                .entity(GradingResult.class);
 
         if (!result.pass()) {
             System.out.println("❌ FAITHFULNESS FAIL: " + result.reasoning());
             System.out.println("EXPECTED STEPS: " + testCase.expectedRemediation());
-            System.out.println("ACTUAL STEPS: " + response.remainingSteps());
+            System.out.println("ACTUAL STEPS: " + response.remediationSteps());
         } else {
             System.out.println("✅ FAITHFULNESS PASS: " + result.reasoning());
             System.out.println("EXPECTED STEPS: " + testCase.expectedRemediation());
-            System.out.println("ACTUAL STEPS: " + response.remainingSteps());
+            System.out.println("ACTUAL STEPS: " + response.remediationSteps());
         }
-
         Assertions.assertTrue(result.pass(), "Faithfulness Failed: " + result.reasoning());
+    }
+
+    private String mapAlertToScenario(String serviceName, String alertHeader) {
+        String key = serviceName + "::" + alertHeader;
+
+        // Simple heuristic mapping based on your Runbook headers
+        return switch (key) {
+            // Payment Service
+            case "payment-service::Elevated 5xx Error Rate" -> "payment-500-npe";
+            case "payment-service::Upstream Gateway Latency" -> "payment-latency";
+
+            // Inventory Service
+            case "inventory-service::Database Connection Timeout" -> "inventory-db-timeout";
+            case "inventory-service::Elevated 5xx Error Rate" -> "inventory-stock-mismatch";
+
+            // Default / Fallback
+            default -> "healthy";
+        };
     }
 
     // 2. THE EVALUATION LOOP

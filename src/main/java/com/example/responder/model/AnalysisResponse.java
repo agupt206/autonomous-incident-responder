@@ -9,6 +9,6 @@ public record AnalysisResponse(
         String investigationQuery, // The Lucene query extracted from the runbook
         Map<String, Object> evidence, // Structured data (TraceIDs, counts)
         String responsibleTeam,
-        List<String> remainingSteps,
+        List<String> remediationSteps,
         boolean requiresEscalation,
         List<String> citations) {}
