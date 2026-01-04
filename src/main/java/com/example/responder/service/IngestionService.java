@@ -40,8 +40,8 @@ public class IngestionService implements CommandLineRunner {
                             .withHorizontalRuleCreateDocument(true) // Split by '---' if present
                             .withIncludeCodeBlock(
                                     true) // CRITICAL: Keep Lucene queries inside the text
-                            .withAdditionalMetadata(
-                                    "filename", resource.getFilename()) // Optional auto-metadata
+                            //TODO: uncomment after implementing RAG eval
+                            //.withAdditionalMetadata("filename", resource.getFilename())
                             .build();
 
             // 2. Read and Parse
