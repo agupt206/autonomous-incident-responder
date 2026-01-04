@@ -20,8 +20,11 @@ public class ToolsConfig {
     }
 
     @Bean
-    @Description("Executes a structured search against the ELF Logging System. Input must be a valid Lucene query string.")
-    public Function<ElfLogSearchTool.Request, ElfLogSearchTool.Response> searchElfLogs(EmbeddedLogEngine engine) {
+    @Description(
+            "Executes a structured search against the ELF Logging System. Input must be a valid"
+                    + " Lucene query string.")
+    public Function<ElfLogSearchTool.Request, ElfLogSearchTool.Response> searchElfLogs(
+            EmbeddedLogEngine engine) {
         return new ElfLogSearchTool(engine);
     }
 }

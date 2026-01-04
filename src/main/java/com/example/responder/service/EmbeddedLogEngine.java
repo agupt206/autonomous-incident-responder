@@ -2,8 +2,10 @@ package com.example.responder.service;
 
 import com.example.responder.tools.ElfLogSearchTool; // We will create this in Step 5
 import jakarta.annotation.PostConstruct;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import org.apache.lucene.analysis.core.WhitespaceAnalyzer;
-import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.*;
 import org.apache.lucene.index.*;
 import org.apache.lucene.queryparser.classic.QueryParser;
@@ -13,10 +15,6 @@ import org.apache.lucene.store.Directory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
 
 @Service
 public class EmbeddedLogEngine {
@@ -37,17 +35,19 @@ public class EmbeddedLogEngine {
         addLog(writer, "payment-service", "INFO", "200", "opentracing-log", "tx-ok-1");
 
         // Seed Data: 3 Broken Logs (Matching the Runbook criteria)
-        //addLog(writer, "payment-service", "ERROR", "500", "opentracing-log", "elf-700-1");
-        //addLog(writer, "payment-service", "ERROR", "502", "opentracing-log", "elf-700-2");
-        //addLog(writer, "payment-service", "ERROR", "500", "opentracing-log", "elf-700-3");
+        // addLog(writer, "payment-service", "ERROR", "500", "opentracing-log", "elf-700-1");
+        // addLog(writer, "payment-service", "ERROR", "502", "opentracing-log", "elf-700-2");
+        // addLog(writer, "payment-service", "ERROR", "500", "opentracing-log", "elf-700-3");
 
-        //addLog(writer, "inventory-service", "ERROR", "500", "opentracing-log", "elf-888");
+        // addLog(writer, "inventory-service", "ERROR", "500", "opentracing-log", "elf-888");
 
         writer.close();
         log.info(">>> Embedded Lucene Index initialized with seed data.");
     }
 
-    private void addLog(IndexWriter w, String app, String level, String status, String type, String traceId) throws IOException {
+    private void addLog(
+            IndexWriter w, String app, String level, String status, String type, String traceId)
+            throws IOException {
         Document doc = new Document();
         // TextField = analyzed (good for text), StringField = exact match only
         doc.add(new TextField("application.name", app, Field.Store.YES));
@@ -79,12 +79,12 @@ public class EmbeddedLogEngine {
                     (int) docs.totalHits.value,
                     traceIds,
                     List.of("payment-pod-a", "payment-pod-b"), // Simulated pod names
-                    "Search successful. Found " + docs.totalHits.value + " matches."
-            );
+                    "Search successful. Found " + docs.totalHits.value + " matches.");
 
         } catch (Exception e) {
             log.error("Lucene Query Failed", e);
-            return new ElfLogSearchTool.Response(0, List.of(), List.of(), "Invalid Query Syntax: " + e.getMessage());
+            return new ElfLogSearchTool.Response(
+                    0, List.of(), List.of(), "Invalid Query Syntax: " + e.getMessage());
         }
     }
 }

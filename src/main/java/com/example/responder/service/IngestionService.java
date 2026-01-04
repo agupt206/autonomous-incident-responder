@@ -34,7 +34,9 @@ public class IngestionService implements CommandLineRunner {
             String serviceKey = resource.getFilename().replace(".md", "").toLowerCase();
             textReader.getCustomMetadata().put("service_name", serviceKey);
 
-            var splitter = new TokenTextSplitter(); // Markdown often needs specific splitters, but Token is fine for now
+            var splitter =
+                    new TokenTextSplitter(); // Markdown often needs specific splitters, but Token
+            // is fine for now
             var documents = splitter.apply(textReader.get());
 
             vectorStore.accept(documents);

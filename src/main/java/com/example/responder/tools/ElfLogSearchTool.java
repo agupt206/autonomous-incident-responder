@@ -1,12 +1,13 @@
 package com.example.responder.tools;
 
 import com.example.responder.service.EmbeddedLogEngine;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import java.util.List;
 import java.util.function.Function;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-public class ElfLogSearchTool implements Function<ElfLogSearchTool.Request, ElfLogSearchTool.Response> {
+public class ElfLogSearchTool
+        implements Function<ElfLogSearchTool.Request, ElfLogSearchTool.Response> {
 
     private static final Logger log = LoggerFactory.getLogger(ElfLogSearchTool.class);
     private final EmbeddedLogEngine searchEngine;
@@ -21,8 +22,7 @@ public class ElfLogSearchTool implements Function<ElfLogSearchTool.Request, ElfL
             int matchCount,
             List<String> sampleTraceIds,
             List<String> affectedPods,
-            String summary
-    ) {}
+            String summary) {}
 
     @Override
     public Response apply(Request request) {
