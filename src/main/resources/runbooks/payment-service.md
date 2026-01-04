@@ -9,13 +9,13 @@ type:opentracing-log AND log.level:ERROR AND application.name:"payment-service" 
 ```   
 
 ### 2. Remediation
-**Step #1. Check the healthCheck tool for "DOWN" status.**
+**1. Check the healthCheck tool for "DOWN" status.**
 
-**Step #2.If the service is "UP", query the logs to identify the specific exception type.**
+**2.If the service is "UP", query the logs to identify the specific exception type.**
 
-**Step #3.If the exception is PaymentDeclinedException, this is a valid business error; do not page.**
+**3.If the exception is PaymentDeclinedException, this is a valid business error; do not page.**
 
-**Step #4.If the exception is NullPointerException, roll back the last deployment immediately.**
+**4.If the exception is NullPointerException, roll back the last deployment immediately.**
 
 ----
 
@@ -27,8 +27,8 @@ service:"payment-service" AND metric:latency AND value > 2000
 ```   
 
 ### 2. Remediation
-**Step #1.Check the healthCheck tool for "DOWN" status.**
+**1.Check the healthCheck tool for "DOWN" status.**
 
-**Step #2. If health is UP, escalate to the Payment Service Team via Slack channel #payment-platform.**
+**2. If health is UP, escalate to the Payment Service Team via Slack channel #payment-platform.**
 
-**Step #3. Do not restart the payment service, as this will drop active transactions.**
+**3. Do not restart the payment service, as this will drop active transactions.**

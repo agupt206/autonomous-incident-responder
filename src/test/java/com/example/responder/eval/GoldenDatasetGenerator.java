@@ -47,7 +47,7 @@ public class GoldenDatasetGenerator {
                         2. 'serviceName': Set this exactly to "{serviceName}".
                         3. 'userIssue': A vague but urgent message a human would type.
                         4. 'expectedAlertHeader': The specific Name of the alert (extract the text from the header, excluding '##' markers and the 'Alert:' prefix).
-                        5. 'expectedLuceneQuery': Extract the content of the ```lucene code block found specifically inside the 'Detection Logic' section.
+                        5. 'expectedLuceneQuery': Extract the lucene query. CRITICAL: Remove all newlines and ensure it is a single line of text."
                         6. 'expectedRemediation': A JSON List of strings. Extract steps from 'Remediation'.
 
                         CRITICAL JSON FORMATTING RULES:

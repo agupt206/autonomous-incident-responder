@@ -120,6 +120,9 @@ public class AgentEvaluationTest {
     private void verifyActionCorrectness(EvaluationCase testCase, AnalysisResponse response) {
         ChatClient judge = clientBuilder.build();
 
+        String distinctExpected = testCase.expectedLuceneQuery().replace("\n", "").trim();
+        String distinctActual = response.investigationQuery().replace("\n", "").trim();
+
         var result =
                 judge.prompt()
                         .system(
@@ -140,8 +143,8 @@ public class AgentEvaluationTest {
 
         if (!result.pass()) {
             System.out.println("❌ ACTION FAIL: " + result.reasoning());
-            System.out.println("EXPECTED QUERY: " + testCase.expectedLuceneQuery());
-            System.out.println("GENERATED QUERY: " + response.investigationQuery());
+            System.out.println("EXPECTED QUERY: " + distinctExpected);
+            System.out.println("GENERATED QUERY: " + distinctActual);
         } else {
             System.out.println("✅ ACTION PASS: " + result.reasoning());
             System.out.println("EXPECTED QUERY: " + testCase.expectedLuceneQuery());
