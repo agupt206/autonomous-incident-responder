@@ -31,7 +31,7 @@ public class Runner {
             System.out.println("\n>>> Asking AI about 'Connection Refused'...");
             var testIncidentRequest =
                     new IncidentRequest(
-                            "payment-gateway", "ERROR: ECONNREFUSED at /payment-gateway");
+                            "payment-gateway", "ERROR: ECONNREFUSED at /payment-gateway", "1 h");
             var response = agent.analyze(testIncidentRequest);
 
             System.out.println("\n>>> AI RESPONSE:");

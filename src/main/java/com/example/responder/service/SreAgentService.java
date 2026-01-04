@@ -2,93 +2,114 @@ package com.example.responder.service;
 
 import com.example.responder.model.AnalysisResponse;
 import com.example.responder.model.IncidentRequest;
-import java.util.List;
-import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor; // <--- Import this
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+import java.util.stream.Collectors;
+
 @Service
 public class SreAgentService {
 
     private static final Logger log = LoggerFactory.getLogger(SreAgentService.class);
+
     private final ChatClient chatClient;
     private final VectorStore vectorStore;
 
     public SreAgentService(ChatClient.Builder builder, VectorStore vectorStore) {
-        this.chatClient =
-                builder
-                        // Built-in logging: Prints the Prompt & Token usage to the console
-                        .defaultAdvisors(new SimpleLoggerAdvisor())
-                        .build();
+        // Register the tools so the Agent has "Hands"
+        // These strings must match the @Bean names in ToolsConfig.java
+        this.chatClient = builder
+                .defaultTools("healthCheck", "searchElfLogs")
+                .build();
         this.vectorStore = vectorStore;
     }
 
     public AnalysisResponse analyze(IncidentRequest request) {
-        long startTime = System.currentTimeMillis();
+        log.info(">>> AGENT START: Analyzing issue '{}' for service '{}'", request.issue(), request.serviceName());
 
-        // --- PHASE 1: Retrieval (The Memory) ---
-        List<Document> similarDocuments =
-                vectorStore.similaritySearch(
-                        SearchRequest.builder().query(request.issue()).topK(2).build());
+        // 1. CONTEXT PREPARATION (Hybrid Search)
+        // We filter by 'service_name' metadata to ensure we only get the correct Runbook.
+        // This prevents the "Inventory" runbook from polluting the "Payment" analysis.
+        //String serviceKey = request.serviceName().toLowerCase().replace(" ", "-");
+        //String safeIssue = safeTruncate(request.issue(), 100);
 
-        long retrievalTime = System.currentTimeMillis() - startTime;
-        log.info(
-                ">>> RAG Retrieval: Found {} docs in {}ms", similarDocuments.size(), retrievalTime);
+        SearchRequest searchRequest = SearchRequest.builder().query(request.issue())
+                .topK(2)
+                //.filterExpression("service_name == '" + serviceKey + "'")
+                .build();
+
+        List<Document> similarDocuments = vectorStore.similaritySearch(searchRequest);
 
         String context =
                 similarDocuments.stream()
                         .map(Document::getFormattedContent)
-                        .collect(Collectors.joining("\n"));
+                        .collect(Collectors.joining("\n---\n"));
 
-        // --- PHASE 2: Generation (The Brain) ---
-        long aiStartTime = System.currentTimeMillis();
+        // Default to 1 hour if user didn't specify
+        String timeWindow = request.timeWindow() != null ? request.timeWindow() : "1h";
 
-        AnalysisResponse response =
-                this.chatClient
-                        .prompt()
-                        .user(
-                                u ->
-                                        u.text(
-                                                        """
-                    You are a Senior SRE. Analyze the issue using the provided RUNBOOKS and TOOLS.
-
-                    ISSUE: {issue}
-                    SERVICE: {service}
-                    RUNBOOKS: {context}
-
-                    INSTRUCTIONS:
-                    1. If the issue is a question (e.g. "Is it up?"), USE THE TOOL to check status.
-                    2. Incorporate the tool's findings into your root cause hypothesis.
-
-                    *** CRITICAL PRIORITY RULES: ***
-                    1. If the tool reports "DOWN", 'requiresEscalation' is TRUE.
-                    2. If the tool reports "UP":
-                       - AND the 'issue' is a generic question (e.g. "Is the system up?"), then ignore runbooks and say "No action required".
-                       - BUT IF the 'issue' contains specific error logs (e.g. "401", "Timeout", "Latency"), you MUST analyze the runbooks to find the fix.
-
-                    RULES FOR OUTPUT:
-                    1. 'suggestedSteps': CLI commands only.
-                    2. 'rootCauseHypothesis': Mention the tool's result.
-                    3. 'requiresEscalation': True only if tool reports "DOWN".
+        // 2. THE PROMPT (The "Brain")
+        // We use a structured "Chain of Thought" prompt to guide the Agent through the team's specific workflow.
+        return this.chatClient.prompt()
+                .user(u -> u.text("""
+                    You are a Process-Aware SRE Agent. Your job is to analyze incidents strictly following the provided RUNBOOKS.
+                    
+                    INPUT CONTEXT:
+                    - Service: {service}
+                    - User Issue: {issue}
+                    - Time Window: {timeWindow}
+                    
+                    RUNBOOK CONTENT (Markdown):
+                    {context}
+                    
+                    ---------------------------------------------------------
+                    INSTRUCTIONS (Follow this Sequence):
+                    
+                    PHASE 1: TRIAGE (Pulse Check)
+                    1. Call the 'healthCheck' tool for the service.
+                    2. IF 'DOWN': The issue is critical availability.
+                    3. IF 'UP': The issue is likely logic/performance (proceed to investigation).
+                    
+                    PHASE 2: INVESTIGATION (Forensics)
+                    1. Read the Runbook provided in context. Find the section that matches the User Issue.
+                    2. EXTRACT the Lucene Query from the ```lucene code block in that section.
+                    3. CALL the 'searchElfLogs' tool using that exact query and the time window.
+                    4. ANALYZE the tool's output (Match Count, Trace IDs).
+                    
+                    PHASE 3: REPORTING (Final Answer)
+                    1. Map your findings into the JSON structure below.
+                    
+                    ---------------------------------------------------------
+                    JSON MAPPING RULES:
+                    - 'failureType': The header of the matching Alert section (e.g. "Elevated 5xx Error Rate").
+                    - 'rootCauseHypothesis': Synthesize the Health Status + Log Search Results (e.g., "Service is UP, but logs show 142 500-errors").
+                    - 'investigationQuery': The exact Lucene string you extracted.
+                    - 'responsibleTeam': The specific team mentioned in the 'Escalation' section.
+                    - 'evidence': A key-value map.
+                        * Key: "Trace IDs" -> Value: List from log tool.
+                        * Key: "Match Count" -> Value: Number from log tool.
+                        * Key: "Health Status" -> Value: Result of healthCheck tool.
+                    - 'remainingSteps': Any manual fix actions from the "Remediation" section.
+                    - 'requiresEscalation': True if the Runbook says to escalate or if severity is Critical.
                     """)
-                                                .param("service", request.serviceName())
-                                                .param("issue", request.issue())
-                                                .param("context", context))
-                        .tools("healthCheck")
-                        .call()
-                        .entity(AnalysisResponse.class);
+                        .param("service", request.serviceName())
+                        .param("issue", request.issue())
+                        .param("timeWindow", timeWindow)
+                        .param("context", context)
+                )
+                .call()
+                .entity(AnalysisResponse.class);
+    }
 
-        long aiTime = System.currentTimeMillis() - aiStartTime;
-        long totalTime = System.currentTimeMillis() - startTime;
-
-        log.info(">>> AI Analysis: Generated in {}ms. Total Request Time: {}ms", aiTime, totalTime);
-
-        return response;
+    // Safety: Prevent huge inputs from crashing the context window
+    private String safeTruncate(String input, int maxLength) {
+        if (input == null) return "";
+        return input.length() > maxLength ? input.substring(0, maxLength) : input;
     }
 }

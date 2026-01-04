@@ -25,17 +25,18 @@ public class IngestionService implements CommandLineRunner {
     public void run(String... args) throws Exception {
         // 1. Use a Pattern Resolver to find ALL .txt files
         ResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
-        Resource[] resources = resolver.getResources("classpath:runbooks/*.txt");
+        Resource[] resources = resolver.getResources("classpath:runbooks/*.md"); // Changed to .md
 
         for (Resource resource : resources) {
-            log.info(">>> Processing Runbook: {}", resource.getFilename());
-
-            // 2. Read and Split
             var textReader = new TextReader(resource);
-            var splitter = new TokenTextSplitter();
+
+            // Metadata for Hybrid Search
+            String serviceKey = resource.getFilename().replace(".md", "").toLowerCase();
+            textReader.getCustomMetadata().put("service_name", serviceKey);
+
+            var splitter = new TokenTextSplitter(); // Markdown often needs specific splitters, but Token is fine for now
             var documents = splitter.apply(textReader.get());
 
-            // 3. Store in Elasticsearch
             vectorStore.accept(documents);
             log.info(">>> Ingested {} documents from {}", documents.size(), resource.getFilename());
         }
