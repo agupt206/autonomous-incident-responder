@@ -1,8 +1,0 @@
-== RUNBOOK: Inventory Service High Latency ==
-SYMPTOM: Slow response times / Latency > 500ms
-ROOT CAUSE: Database CPU Pegged at 100% due to missing index.
-CHECK: Use health tool to verify DB status.
-FIX:
-1. Run 'kubectl scale statefulset inventory-db --replicas=3'
-2. Run 'db-admin flush-cache'
-3. If CPU remains > 90%, escalate to DBA.
