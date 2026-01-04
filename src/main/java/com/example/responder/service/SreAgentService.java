@@ -137,7 +137,7 @@ public class SreAgentService {
     }
 
     // Safety: Prevent huge inputs from crashing the context window
-    // TODO: currently not used - add later
+    // TODO: currently not used - add later if useful
     private String safeTruncate(String input, int maxLength) {
         if (input == null) return "";
         return input.length() > maxLength ? input.substring(0, maxLength) : input;

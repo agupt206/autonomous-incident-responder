@@ -32,12 +32,13 @@ public class EmbeddedLogEngine {
         IndexWriter writer = new IndexWriter(memoryIndex, indexWriterConfig);
 
         // Seed Data: 1 Healthy Log
-        addLog(writer, "payment-service", "INFO", "200", "opentracing-log", "tx-ok-1");
+        addLog(writer, "payment-service", "INFO", "200", "opentracing-log", "tx-ok-1", "Transaction processed successfully");
 
         // Seed Data: 3 Broken Logs (Matching the Runbook criteria)
-        addLog(writer, "payment-service", "ERROR", "500", "opentracing-log", "elf-700-1");
-        addLog(writer, "payment-service", "ERROR", "502", "opentracing-log", "elf-700-2");
-        addLog(writer, "payment-service", "ERROR", "500", "opentracing-log", "elf-700-3");
+        addLog(writer, "payment-service", "ERROR", "500", "opentracing-log", "elf-700-1", "Connection timed out");
+        addLog(writer, "payment-service", "ERROR", "502", "opentracing-log", "elf-700-2", "Bad Gateway");
+        //addLog(writer, "payment-service", "ERROR", "500", "opentracing-log", "elf-700-3", "NullPointerException in processing");
+        addLog(writer, "payment-service", "ERROR", "500", "opentracing-log", "elf-700-4", "PaymentDeclinedException: Insufficient funds");
 
         // addLog(writer, "inventory-service", "ERROR", "500", "opentracing-log", "elf-888");
 
@@ -46,7 +47,7 @@ public class EmbeddedLogEngine {
     }
 
     private void addLog(
-            IndexWriter w, String app, String level, String status, String type, String traceId)
+            IndexWriter w, String app, String level, String status, String type, String traceId, String message)
             throws IOException {
         Document doc = new Document();
         // TextField = analyzed (good for text), StringField = exact match only
@@ -55,6 +56,7 @@ public class EmbeddedLogEngine {
         doc.add(new StringField("type", type, Field.Store.YES));
         doc.add(new TextField("status_code", status, Field.Store.YES)); // For range queries
         doc.add(new StoredField("trace_id", traceId));
+        doc.add(new TextField("message", message, Field.Store.YES));
         w.addDocument(doc);
     }
 
