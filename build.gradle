@@ -38,6 +38,8 @@ dependencies {
     implementation 'org.springframework.ai:spring-ai-elasticsearch-store'
     implementation 'org.springframework.boot:spring-boot-starter-data-elasticsearch'
 
+    implementation 'org.springframework.ai:spring-ai-markdown-document-reader'
+
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
 
     // Apache Lucene for In-Memory Search Simulation

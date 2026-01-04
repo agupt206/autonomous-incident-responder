@@ -10,4 +10,5 @@ public record AnalysisResponse(
         Map<String, Object> evidence, // Structured data (TraceIDs, counts)
         String responsibleTeam,
         List<String> remainingSteps,
-        boolean requiresEscalation) {}
+        boolean requiresEscalation,
+        List<String> citations) {}

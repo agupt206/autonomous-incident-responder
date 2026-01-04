@@ -35,9 +35,9 @@ public class EmbeddedLogEngine {
         addLog(writer, "payment-service", "INFO", "200", "opentracing-log", "tx-ok-1");
 
         // Seed Data: 3 Broken Logs (Matching the Runbook criteria)
-        // addLog(writer, "payment-service", "ERROR", "500", "opentracing-log", "elf-700-1");
-        // addLog(writer, "payment-service", "ERROR", "502", "opentracing-log", "elf-700-2");
-        // addLog(writer, "payment-service", "ERROR", "500", "opentracing-log", "elf-700-3");
+        addLog(writer, "payment-service", "ERROR", "500", "opentracing-log", "elf-700-1");
+        addLog(writer, "payment-service", "ERROR", "502", "opentracing-log", "elf-700-2");
+        addLog(writer, "payment-service", "ERROR", "500", "opentracing-log", "elf-700-3");
 
         // addLog(writer, "inventory-service", "ERROR", "500", "opentracing-log", "elf-888");
 

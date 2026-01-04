@@ -1,15 +1,19 @@
 package com.example.responder.service;
 
+import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.reader.TextReader;
-import org.springframework.ai.transformer.splitter.TokenTextSplitter;
+// --- CHANGED IMPORTS ---
+import org.springframework.ai.reader.markdown.MarkdownDocumentReader;
+import org.springframework.ai.reader.markdown.config.MarkdownDocumentReaderConfig;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.core.io.Resource;
-import org.springframework.core.io.support.PathMatchingResourcePatternResolver; // Import 1
-import org.springframework.core.io.support.ResourcePatternResolver; // Import 2
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
+import org.springframework.core.io.support.ResourcePatternResolver;
 import org.springframework.stereotype.Component;
+
+// -----------------------
 
 @Component
 public class IngestionService implements CommandLineRunner {
@@ -23,21 +27,34 @@ public class IngestionService implements CommandLineRunner {
 
     @Override
     public void run(String... args) throws Exception {
-        // 1. Use a Pattern Resolver to find ALL .txt files
         ResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
-        Resource[] resources = resolver.getResources("classpath:runbooks/*.md"); // Changed to .md
+        Resource[] resources = resolver.getResources("classpath:runbooks/*.md");
 
         for (Resource resource : resources) {
-            var textReader = new TextReader(resource);
 
-            // Metadata for Hybrid Search
+            // --- CHANGE START: Use MarkdownDocumentReader ---
+
+            // 1. Configure the reader to respect structure
+            MarkdownDocumentReaderConfig config =
+                    MarkdownDocumentReaderConfig.builder()
+                            .withHorizontalRuleCreateDocument(true) // Split by '---' if present
+                            .withIncludeCodeBlock(
+                                    true) // CRITICAL: Keep Lucene queries inside the text
+                            .withAdditionalMetadata(
+                                    "filename", resource.getFilename()) // Optional auto-metadata
+                            .build();
+
+            // 2. Read and Parse
+            // The reader automatically splits based on headers (#, ##) and structure
+            MarkdownDocumentReader reader = new MarkdownDocumentReader(resource, config);
+            List<org.springframework.ai.document.Document> documents = reader.get();
+
+            // 3. Inject Domain Metadata (Service Name)
             String serviceKey = resource.getFilename().replace(".md", "").toLowerCase();
-            textReader.getCustomMetadata().put("service_name", serviceKey);
-
-            var splitter =
-                    new TokenTextSplitter(); // Markdown often needs specific splitters, but Token
-            // is fine for now
-            var documents = splitter.apply(textReader.get());
+            for (var doc : documents) {
+                doc.getMetadata().put("service_name", serviceKey);
+            }
+            // --- CHANGE END ---
 
             vectorStore.accept(documents);
             log.info(">>> Ingested {} documents from {}", documents.size(), resource.getFilename());

@@ -36,6 +36,7 @@ public class SreAgentService {
         // 1. CONTEXT PREPARATION (Hybrid Search)
         // We filter by 'service_name' metadata to ensure we only get the correct Runbook.
         // This prevents the "Inventory" runbook from polluting the "Payment" analysis.
+        // TODO: uncomment after implementing RAG eval
         // String serviceKey = request.serviceName().toLowerCase().replace(" ", "-");
         // String safeIssue = safeTruncate(request.issue(), 100);
 
@@ -43,10 +44,21 @@ public class SreAgentService {
                 SearchRequest.builder()
                         .query(request.issue())
                         .topK(2)
+                        // TODO: uncomment after implementing RAG eval
                         // .filterExpression("service_name == '" + serviceKey + "'")
                         .build();
 
         List<Document> similarDocuments = vectorStore.similaritySearch(searchRequest);
+
+        List<String> retrievedSources =
+                similarDocuments.stream()
+                        .map(
+                                doc ->
+                                        doc.getMetadata()
+                                                .getOrDefault("service_name", "unknown")
+                                                .toString())
+                        .distinct()
+                        .toList();
 
         String context =
                 similarDocuments.stream()
@@ -59,12 +71,13 @@ public class SreAgentService {
         // 2. THE PROMPT (The "Brain")
         // We use a structured "Chain of Thought" prompt to guide the Agent through the team's
         // specific workflow.
-        return this.chatClient
-                .prompt()
-                .user(
-                        u ->
-                                u.text(
-                                                """
+        var aiGeneratedResponse =
+                this.chatClient
+                        .prompt()
+                        .user(
+                                u ->
+                                        u.text(
+                                                        """
                     You are a Process-Aware SRE Agent. Your job is to analyze incidents strictly following the provided RUNBOOKS.
 
                     INPUT CONTEXT:
@@ -105,15 +118,26 @@ public class SreAgentService {
                     - 'remainingSteps': Any manual fix actions from the "Remediation" section.
                     - 'requiresEscalation': True if the Runbook says to escalate or if severity is Critical.
                     """)
-                                        .param("service", request.serviceName())
-                                        .param("issue", request.issue())
-                                        .param("timeWindow", timeWindow)
-                                        .param("context", context))
-                .call()
-                .entity(AnalysisResponse.class);
+                                                .param("service", request.serviceName())
+                                                .param("issue", request.issue())
+                                                .param("timeWindow", timeWindow)
+                                                .param("context", context))
+                        .call()
+                        .entity(AnalysisResponse.class);
+
+        return new AnalysisResponse(
+                aiGeneratedResponse.failureType(),
+                aiGeneratedResponse.rootCauseHypothesis(),
+                aiGeneratedResponse.investigationQuery(),
+                aiGeneratedResponse.evidence(),
+                aiGeneratedResponse.responsibleTeam(),
+                aiGeneratedResponse.remainingSteps(),
+                aiGeneratedResponse.requiresEscalation(),
+                retrievedSources);
     }
 
     // Safety: Prevent huge inputs from crashing the context window
+    // TODO: currently not used - add later
     private String safeTruncate(String input, int maxLength) {
         if (input == null) return "";
         return input.length() > maxLength ? input.substring(0, maxLength) : input;
