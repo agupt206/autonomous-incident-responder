@@ -17,6 +17,8 @@ type:opentracing-log AND log.level:ERROR AND application.name:"payment-service" 
 
 **Step #4.If the exception is NullPointerException, roll back the last deployment immediately.**
 
+----
+
 ## Alert: Upstream Gateway Latency
 ### 1. Detection Logic
 **Query:**

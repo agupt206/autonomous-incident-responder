@@ -20,6 +20,9 @@ service:"inventory-service" AND log.message:"Connection check failed" AND db.typ
 
 **Step #5. If the database is reachable but latency is high, Escalate to the Database Reliability Team (Slack: #dba-urgent).**
 
+----
+
+
 ## Alert: Elevated 5xx Error Rate
 
 ### 1. Detection Logic (ELF Query)
