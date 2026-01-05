@@ -18,7 +18,6 @@ import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -55,15 +54,22 @@ public class AgentEvaluationTest {
         Resource[] resources = resolver.getResources("classpath:runbooks/*.md");
 
         return Stream.of(resources)
-                .flatMap(resource -> {
-                    try {
-                        String content = new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-                        String serviceName = resource.getFilename().replace(".md", "").toLowerCase();
-                        return datasetGenerator.generateTestCases(content, serviceName).stream();
-                    } catch (IOException e) {
-                        throw new RuntimeException("Failed to read runbook", e);
-                    }
-                });
+                .flatMap(
+                        resource -> {
+                            try {
+                                String content =
+                                        new String(
+                                                resource.getInputStream().readAllBytes(),
+                                                StandardCharsets.UTF_8);
+                                String serviceName =
+                                        resource.getFilename().replace(".md", "").toLowerCase();
+                                return datasetGenerator
+                                        .generateTestCases(content, serviceName)
+                                        .stream();
+                            } catch (IOException e) {
+                                throw new RuntimeException("Failed to read runbook", e);
+                            }
+                        });
     }
 
     // --- 2. MAIN TEST LOOP (ROBUST ERROR HANDLING) ---
@@ -81,11 +87,15 @@ public class AgentEvaluationTest {
 
         try {
             // A. SETUP
-            String scenarioId = mapAlertToScenario(testCase.serviceName(), testCase.expectedAlertHeader());
+            String scenarioId =
+                    mapAlertToScenario(testCase.serviceName(), testCase.expectedAlertHeader());
             logEngine.loadScenario(scenarioId);
 
             // B. EXECUTION
-            response = agent.analyze(new IncidentRequest(testCase.serviceName(), testCase.userIssue(), "1h"));
+            response =
+                    agent.analyze(
+                            new IncidentRequest(
+                                    testCase.serviceName(), testCase.userIssue(), "1h"));
 
             // C. EVALUATION
             precisionResult = calculateRetrievalPrecision(testCase, response);
@@ -96,32 +106,34 @@ public class AgentEvaluationTest {
             capturedException = e;
             // Create a dummy response to prevent NPEs in the report
             if (response == null) {
-                response = new AnalysisResponse(
-                        "CRASHED",
-                        "System Exception: " + e.getMessage(),
-                        "N/A",
-                        Map.of(),
-                        "N/A",
-                        List.of(),
-                        true,
-                        List.of()
-                );
+                response =
+                        new AnalysisResponse(
+                                "CRASHED",
+                                "System Exception: " + e.getMessage(),
+                                "N/A",
+                                Map.of(),
+                                "N/A",
+                                List.of(),
+                                true,
+                                List.of());
             }
         } finally {
             // D. RECORDING (Guaranteed to run)
-            reportEntries.add(new EvaluationReportEntry(
-                    testCase,
-                    response,
-                    precisionResult,
-                    actionResult,
-                    faithfulnessResult,
-                    capturedException
-            ));
+            reportEntries.add(
+                    new EvaluationReportEntry(
+                            testCase,
+                            response,
+                            precisionResult,
+                            actionResult,
+                            faithfulnessResult,
+                            capturedException));
         }
 
         // E. ASSERTION (Fail the test AFTER recording)
         if (capturedException != null) {
-            Assertions.fail("Test Failed with Exception: " + capturedException.getMessage(), capturedException);
+            Assertions.fail(
+                    "Test Failed with Exception: " + capturedException.getMessage(),
+                    capturedException);
         }
 
         // Standard assertions
@@ -131,17 +143,26 @@ public class AgentEvaluationTest {
 
         Assertions.assertAll(
                 "Agent Performance Metrics",
-                () -> Assertions.assertTrue(finalPrecision.pass(), "Retrieval Precision Failed: " + finalPrecision.reasoning()),
-                () -> Assertions.assertTrue(finalAction.pass(), "Action Correctness Failed: " + finalAction.reasoning()),
-                () -> Assertions.assertTrue(finalFaithfulness.pass(), "Plan Faithfulness Failed: " + finalFaithfulness.reasoning())
-        );
+                () ->
+                        Assertions.assertTrue(
+                                finalPrecision.pass(),
+                                "Retrieval Precision Failed: " + finalPrecision.reasoning()),
+                () ->
+                        Assertions.assertTrue(
+                                finalAction.pass(),
+                                "Action Correctness Failed: " + finalAction.reasoning()),
+                () ->
+                        Assertions.assertTrue(
+                                finalFaithfulness.pass(),
+                                "Plan Faithfulness Failed: " + finalFaithfulness.reasoning()));
     }
 
     // --- 3. REPORTING HOOK ---
 
     @AfterAll
     void generateExperimentReport() {
-        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+        String timestamp =
+                LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
         String filename = "experiment_results_" + timestamp + ".txt";
         Path reportPath = Paths.get(filename);
 
@@ -161,7 +182,11 @@ public class AgentEvaluationTest {
         }
 
         try {
-            Files.writeString(reportPath, sb.toString(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            Files.writeString(
+                    reportPath,
+                    sb.toString(),
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING);
             System.out.println("\n\n=======================================================");
             System.out.println("✅ REPORT GENERATED: " + reportPath.toAbsolutePath());
             System.out.println("=======================================================\n");
@@ -178,30 +203,36 @@ public class AgentEvaluationTest {
         if (entry.exception() != null) {
             StringWriter sw = new StringWriter();
             entry.exception().printStackTrace(new PrintWriter(sw));
-            crashInfo = "\n[CRITICAL FAILURE]\nException: " + entry.exception().getMessage() + "\n" + sw.toString() + "\n";
+            crashInfo =
+                    "\n[CRITICAL FAILURE]\nException: "
+                            + entry.exception().getMessage()
+                            + "\n"
+                            + sw.toString()
+                            + "\n";
         }
 
         String rawJson = "N/A";
         try {
             rawJson = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(ar);
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
 
         return """
                === TEST CASE: %s ===
                SERVICE: %s
                SCENARIO: %s
-               
+
                [INPUT]
                User Query: %s
-               
+
                [EXPECTED_GROUND_TRUTH]
                Lucene Query: %s
                Remediation Steps: %s
-               
+
                [ACTUAL_AGENT_OUTPUT]
                Lucene Query: %s
                Remediation Steps: %s
-               
+
                [EVALUATION_METRICS]
                - Retrieval Precision: [%s] (%s)
                - Action Correctness:  [%s] (%s)
@@ -210,7 +241,7 @@ public class AgentEvaluationTest {
                [RAW_DATA_JSON]
                %s
                ========================
-               
+
                """
                 .formatted(
                         tc.id(),
@@ -221,21 +252,29 @@ public class AgentEvaluationTest {
                         tc.expectedRemediation(),
                         ar.investigationQuery(),
                         ar.remediationSteps(),
-                        entry.precision().pass() ? "PASS" : "FAIL", entry.precision().reasoning(),
-                        entry.action().pass() ? "PASS" : "FAIL", entry.action().reasoning(),
-                        entry.faithfulness().pass() ? "PASS" : "FAIL", entry.faithfulness().reasoning(),
+                        entry.precision().pass() ? "PASS" : "FAIL",
+                        entry.precision().reasoning(),
+                        entry.action().pass() ? "PASS" : "FAIL",
+                        entry.action().reasoning(),
+                        entry.faithfulness().pass() ? "PASS" : "FAIL",
+                        entry.faithfulness().reasoning(),
                         crashInfo,
-                        rawJson
-                );
+                        rawJson);
     }
 
     // --- 4. METRIC CALCULATORS ---
 
-    private GradingResult calculateRetrievalPrecision(EvaluationCase testCase, AnalysisResponse response) {
-        if (response.citations() == null) return new GradingResult(false, "No citations found (null)");
+    private GradingResult calculateRetrievalPrecision(
+            EvaluationCase testCase, AnalysisResponse response) {
+        if (response.citations() == null)
+            return new GradingResult(false, "No citations found (null)");
 
-        boolean precise = response.citations().stream()
-                .allMatch(source -> source.toLowerCase().contains(testCase.serviceName().toLowerCase()));
+        boolean precise =
+                response.citations().stream()
+                        .allMatch(
+                                source ->
+                                        source.toLowerCase()
+                                                .contains(testCase.serviceName().toLowerCase()));
 
         if (precise) {
             return new GradingResult(true, "All citations match service context.");
@@ -244,24 +283,40 @@ public class AgentEvaluationTest {
         }
     }
 
-    private GradingResult calculateActionCorrectness(EvaluationCase testCase, AnalysisResponse response) {
+    private GradingResult calculateActionCorrectness(
+            EvaluationCase testCase, AnalysisResponse response) {
         ChatClient judge = clientBuilder.build();
         return judge.prompt()
                 .system("You are a Syntax Judge.")
-                .user(u -> u.text("EXPECTED: {e} \n ACTUAL: {a} \n Compare functional equivalence.")
-                        .param("e", testCase.expectedLuceneQuery())
-                        .param("a", response.investigationQuery()))
+                .user(
+                        u ->
+                                u.text(
+                                                "EXPECTED: {e} \n"
+                                                        + " ACTUAL: {a} \n"
+                                                        + " Compare functional equivalence.")
+                                        .param("e", testCase.expectedLuceneQuery())
+                                        .param("a", response.investigationQuery()))
                 .call()
                 .entity(GradingResult.class);
     }
 
-    private GradingResult calculatePlanFaithfulness(EvaluationCase testCase, AnalysisResponse response) {
+    private GradingResult calculatePlanFaithfulness(
+            EvaluationCase testCase, AnalysisResponse response) {
         ChatClient judge = clientBuilder.build();
         return judge.prompt()
                 .system("You are a QA Auditor.")
-                .user(u -> u.text("GROUND TRUTH: {gt} \n ACTUAL: {act} \n Check for hallucinations.")
-                        .param("gt", String.join("\n", testCase.expectedRemediation()))
-                        .param("act", String.join("\n", response.remediationSteps())))
+                .user(
+                        u ->
+                                u.text(
+                                                "GROUND TRUTH: {gt} \n"
+                                                        + " ACTUAL: {act} \n"
+                                                        + " Check for hallucinations.")
+                                        .param(
+                                                "gt",
+                                                String.join("\n", testCase.expectedRemediation()))
+                                        .param(
+                                                "act",
+                                                String.join("\n", response.remediationSteps())))
                 .call()
                 .entity(GradingResult.class);
     }
@@ -284,5 +339,5 @@ public class AgentEvaluationTest {
             GradingResult action,
             GradingResult faithfulness,
             Exception exception // New field for crash tracking
-    ) {}
+            ) {}
 }
