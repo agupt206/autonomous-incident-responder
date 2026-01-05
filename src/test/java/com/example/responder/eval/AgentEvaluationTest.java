@@ -303,6 +303,11 @@ public class AgentEvaluationTest {
     private GradingResult calculatePlanFaithfulness(
             EvaluationCase testCase, AnalysisResponse response) {
         ChatClient judge = clientBuilder.build();
+
+        if (response.remediationSteps() == null || response.remediationSteps().isEmpty()) {
+            return new GradingResult(false, "FAIL: Agent returned empty remediation steps.");
+        }
+
         return judge.prompt()
                 .system("You are a QA Auditor.")
                 .user(
