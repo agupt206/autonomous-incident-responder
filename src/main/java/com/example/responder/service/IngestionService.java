@@ -1,9 +1,10 @@
 package com.example.responder.service;
 
+import java.util.ArrayList;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-// --- CHANGED IMPORTS ---
+import org.springframework.ai.document.Document;
 import org.springframework.ai.reader.markdown.MarkdownDocumentReader;
 import org.springframework.ai.reader.markdown.config.MarkdownDocumentReaderConfig;
 import org.springframework.ai.vectorstore.VectorStore;
@@ -12,8 +13,6 @@ import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.core.io.support.ResourcePatternResolver;
 import org.springframework.stereotype.Component;
-
-// -----------------------
 
 @Component
 public class IngestionService implements CommandLineRunner {
@@ -31,33 +30,37 @@ public class IngestionService implements CommandLineRunner {
         Resource[] resources = resolver.getResources("classpath:runbooks/*.md");
 
         for (Resource resource : resources) {
-
-            // --- CHANGE START: Use MarkdownDocumentReader ---
-
-            // 1. Configure the reader to respect structure
+            // 1. Configure Reader
             MarkdownDocumentReaderConfig config =
                     MarkdownDocumentReaderConfig.builder()
-                            .withHorizontalRuleCreateDocument(true) // Split by '---' if present
-                            .withIncludeCodeBlock(
-                                    true) // CRITICAL: Keep Lucene queries inside the text
-                            // TODO: uncomment after implementing RAG eval
-                            .withAdditionalMetadata("filename", resource.getFilename())
+                            .withHorizontalRuleCreateDocument(true)
+                            .withIncludeCodeBlock(true)
                             .build();
 
             // 2. Read and Parse
-            // The reader automatically splits based on headers (#, ##) and structure
             MarkdownDocumentReader reader = new MarkdownDocumentReader(resource, config);
-            List<org.springframework.ai.document.Document> documents = reader.get();
+            List<Document> rawDocuments = reader.get();
 
-            // 3. Inject Domain Metadata (Service Name)
+            // 3. Process Documents (Assign Deterministic IDs)
+            List<Document> processedDocuments = new ArrayList<>();
             String serviceKey = resource.getFilename().replace(".md", "").toLowerCase();
-            for (var doc : documents) {
-                doc.getMetadata().put("service_name", serviceKey);
-            }
-            // --- CHANGE END ---
 
-            vectorStore.accept(documents);
-            log.info(">>> Ingested {} documents from {}", documents.size(), resource.getFilename());
+            for (int i = 0; i < rawDocuments.size(); i++) {
+                Document originalDoc = rawDocuments.get(i);
+
+                // FIX: Use mutate() to create a new Document with a deterministic ID
+                // and inject the service_name metadata.
+                Document newDoc = originalDoc.mutate()
+                        .id(serviceKey + "_chunk_" + i)
+                        .metadata("service_name", serviceKey)
+                        .build();
+
+                processedDocuments.add(newDoc);
+            }
+
+            // 4. Ingest
+            vectorStore.accept(processedDocuments);
+            log.info(">>> Ingested {} documents for '{}' (Idempotent)", processedDocuments.size(), serviceKey);
         }
         log.info(">>> Global Ingestion Complete!");
     }
