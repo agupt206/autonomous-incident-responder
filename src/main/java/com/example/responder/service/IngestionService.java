@@ -35,7 +35,8 @@ public class IngestionService implements CommandLineRunner {
             String serviceKey = resource.getFilename().replace(".md", "").toLowerCase();
 
             // 1. Read content as raw string
-            String content = StreamUtils.copyToString(resource.getInputStream(), StandardCharsets.UTF_8);
+            String content =
+                    StreamUtils.copyToString(resource.getInputStream(), StandardCharsets.UTF_8);
 
             // 2. Manual Split by Horizontal Rule (--- or ----)
             // This guarantees we only split where YOU decided to split in the markdown
@@ -50,17 +51,21 @@ public class IngestionService implements CommandLineRunner {
                 // 3. Create Document with Deterministic ID
                 // "service-name_alert-index"
                 Document doc = new Document(chunkText);
-                Document finalDoc = doc.mutate()
-                        .id(serviceKey + "_alert_" + i)
-                        .metadata("service_name", serviceKey)
-                        .build();
+                Document finalDoc =
+                        doc.mutate()
+                                .id(serviceKey + "_alert_" + i)
+                                .metadata("service_name", serviceKey)
+                                .build();
 
                 processedDocuments.add(finalDoc);
             }
 
             // 4. Ingest
             vectorStore.accept(processedDocuments);
-            log.info(">>> Ingested {} alerts for '{}' (Manual Split)", processedDocuments.size(), serviceKey);
+            log.info(
+                    ">>> Ingested {} alerts for '{}' (Manual Split)",
+                    processedDocuments.size(),
+                    serviceKey);
         }
         log.info(">>> Global Ingestion Complete!");
     }
