@@ -31,13 +31,13 @@ public class SreAgentService {
                 request.issue(),
                 request.serviceName());
 
-        String serviceKey = request.serviceName().toLowerCase().replace(" ", "-");
+        //String serviceKey = request.serviceName().toLowerCase().replace(" ", "-");
 
         SearchRequest searchRequest =
                 SearchRequest.builder()
                         .query(request.issue())
                         .topK(2)
-                        .filterExpression("service_name == '" + serviceKey + "'")
+                        //.filterExpression("service_name == '" + serviceKey + "'")
                         .build();
 
         List<Document> similarDocuments = vectorStore.similaritySearch(searchRequest);
