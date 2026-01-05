@@ -21,97 +21,76 @@ public class SreAgentService {
     private final VectorStore vectorStore;
 
     public SreAgentService(ChatClient.Builder builder, VectorStore vectorStore) {
-        // Register the tools so the Agent has "Hands"
-        // These strings must match the @Bean names in ToolsConfig.java
         this.chatClient = builder.defaultTools("healthCheck", "searchElfLogs").build();
         this.vectorStore = vectorStore;
     }
 
     public AnalysisResponse analyze(IncidentRequest request) {
-        log.info(
-                ">>> AGENT START: Analyzing issue '{}' for service '{}'",
-                request.issue(),
-                request.serviceName());
+        log.info(">>> AGENT START: Analyzing issue '{}' for service '{}'", request.issue(), request.serviceName());
 
-        // 1. CONTEXT PREPARATION (Hybrid Search)
-        // We filter by 'service_name' metadata to ensure we only get the correct Runbook.
-        // This prevents the "Inventory" runbook from polluting the "Payment" analysis.
-        // TODO: uncomment after implementing RAG eval
         String serviceKey = request.serviceName().toLowerCase().replace(" ", "-");
-        // String safeIssue = safeTruncate(request.issue(), 100);
 
-        SearchRequest searchRequest =
-                SearchRequest.builder()
-                        .query(request.issue())
-                        .topK(2)
-                        // TODO: uncomment after implementing RAG eval
-                        .filterExpression("service_name == '" + serviceKey + "'")
-                        .build();
+        SearchRequest searchRequest = SearchRequest.builder()
+                .query(request.issue())
+                .topK(2)
+                .filterExpression("service_name == '" + serviceKey + "'")
+                .build();
 
         List<Document> similarDocuments = vectorStore.similaritySearch(searchRequest);
 
-        List<String> retrievedSources =
-                similarDocuments.stream()
-                        .map(
-                                doc ->
-                                        doc.getMetadata()
-                                                .getOrDefault("service_name", "unknown")
-                                                .toString())
-                        .distinct()
-                        .toList();
+        List<String> retrievedSources = similarDocuments.stream()
+                .map(doc -> doc.getMetadata().getOrDefault("service_name", "unknown").toString())
+                .distinct()
+                .toList();
 
-        String context =
-                similarDocuments.stream()
-                        .map(Document::getFormattedContent)
-                        .collect(Collectors.joining("\n---\n"));
+        // FIX 2: Explicit Visual Separators for the Context
+        // This prevents the "Frankenstein" issue where the LLM reads the Query from Doc A
+        // but the Remediation Steps from Doc B.
+        String context = similarDocuments.stream()
+                .map(doc -> "=== FRAGMENT START ===\n" + doc.getFormattedContent() + "\n=== FRAGMENT END ===")
+                .collect(Collectors.joining("\n\n"));
 
-        // Default to 1 hour if user didn't specify
         String timeWindow = request.timeWindow() != null ? request.timeWindow() : "1h";
 
-        // 2. THE PROMPT (The "Brain")
-        // We use a structured "Chain of Thought" prompt to guide the Agent through the team's
-        // specific workflow.
-        var aiGeneratedResponse =
-                this.chatClient
-                        .prompt()
-                        .user(
-                                u ->
-                                        u.text(
-                                                        """
-                    You are an SRE Incident Analyzer. Your task is to map a User Issue to a specific Runbook Alert and extract structured remediation data.
-
+        // FIX 3: Strict "Source of Truth" Prompting
+        var aiGeneratedResponse = this.chatClient.prompt()
+                .user(u -> u.text("""
+                    You are an SRE Incident Analyzer.
+                    
                     INPUT CONTEXT:
                     - Service: {service}
                     - User Issue: {issue}
-                    - Time Window: {timeWindow}
-
-                    RUNBOOK CONTENT:
+                    
+                    RETRIEVED RUNBOOK FRAGMENTS:
                     {context}
 
                     ---------------------------------------------------------
-                    LOGIC & EXTRACTION RULES:
-
-                    1. **Identify the Alert**: Match the User Issue to the most relevant 'Alert' section in the Runbook.
-                    2. **Extract Query**: Copy the Lucene query from the chosen section exactly.
-                    3. **Extract Steps**: Copy the Remediation steps exactly as a list of strings. Do not summarize.
-                    4. **Pulse Check**:
-                       - Internal Logic: Imagine calling 'healthCheck'.
-                       - If the issue implies the service is totally dead, 'rootCauseHypothesis' should reflect critical availability.
-                       - If the issue implies errors/slowness, 'rootCauseHypothesis' should reflect performance/logic issues.
-
+                    STRICT ANALYSIS RULES:
+                    1. **Select ONE Fragment**: Scan the 'FRAGMENT' blocks. Find the ONE that best matches the User Issue.
+                    2. **Stay in Bounds**: You must extract the Query and Remediation Steps from that *SAME* Fragment. Do not mix content from different fragments.
+                    3. **Verbatim Extraction**: 
+                       - Copy the Remediation Steps EXACTLY as they appear in the text.
+                       - Do NOT paraphrase. Do NOT use your own knowledge. 
+                       - If the text says "Check HikariPool", you must output "Check HikariPool", not "Check Database".
+                    4. **Syntax**: Use SINGLE QUOTES ('') for strings in the Lucene query.
+                    
+                    EXAMPLE OUTPUT:
+                    \\{
+                      "failureType": "High Latency",
+                      "investigationQuery": "service:'app' AND metric:'latency'",
+                      "remediationSteps": [ 
+                        "1. Check Load Balancer status.", 
+                        "2. If healthy, check database locks." 
+                      ]
+                    \\}
                     ---------------------------------------------------------
-                    OUTPUT REQUIREMENT:
-                    Generate a valid JSON object matching the requested schema.
-                    - failureType: The exact header of the matched Alert.
-                    - investigationQuery: The Lucene query (use double quotes for strings).
-                    - remediationSteps: JSON Array of strings containing the exact text of the steps.
+                    Generate the JSON response now:
                     """)
-                                                .param("service", request.serviceName())
-                                                .param("issue", request.issue())
-                                                .param("timeWindow", timeWindow)
-                                                .param("context", context))
-                        .call()
-                        .entity(AnalysisResponse.class);
+                        .param("service", request.serviceName())
+                        .param("issue", request.issue())
+                        .param("context", context))
+                .call()
+                .entity(AnalysisResponse.class);
 
         return new AnalysisResponse(
                 aiGeneratedResponse.failureType(),
@@ -122,12 +101,5 @@ public class SreAgentService {
                 aiGeneratedResponse.remediationSteps(),
                 aiGeneratedResponse.requiresEscalation(),
                 retrievedSources);
-    }
-
-    // Safety: Prevent huge inputs from crashing the context window
-    // TODO: currently not used - add later if useful
-    private String safeTruncate(String input, int maxLength) {
-        if (input == null) return "";
-        return input.length() > maxLength ? input.substring(0, maxLength) : input;
     }
 }
