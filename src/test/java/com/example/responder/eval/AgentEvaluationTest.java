@@ -97,8 +97,8 @@ public class AgentEvaluationTest {
             // B. EXECUTION
             response =
                     agent.analyze(
-                            new IncidentRequest(
-                                    testCase.serviceName(), testCase.userIssue(), "1h"), config);
+                            new IncidentRequest(testCase.serviceName(), testCase.userIssue(), "1h"),
+                            config);
 
             // C. EVALUATION
             precisionResult = calculateRetrievalPrecision(testCase, response);
@@ -226,7 +226,7 @@ public class AgentEvaluationTest {
                === TEST CASE: %s ===
                SERVICE: %s
                SCENARIO: %s
-               
+
                [CONFIGURATION]
                - TopK: %d
                - Min Score: %.2f
@@ -313,7 +313,10 @@ public class AgentEvaluationTest {
 
         return judge.prompt()
                 .system("You are a strict Lucene Query Syntax Validator.")
-                .user(u -> u.text("""
+                .user(
+                        u ->
+                                u.text(
+                                                """
                         TASK: Compare the Actual Query against the Expected Query.
 
                         EXPECTED (Ground Truth): {e}
@@ -327,8 +330,8 @@ public class AgentEvaluationTest {
 
                         Output JSON: \\{ "pass": boolean, "reasoning": "string" \\}
                         """)
-                        .param("e", testCase.expectedLuceneQuery())
-                        .param("a", response.investigationQuery()))
+                                        .param("e", testCase.expectedLuceneQuery())
+                                        .param("a", response.investigationQuery()))
                 .call()
                 .entity(GradingResult.class);
     }

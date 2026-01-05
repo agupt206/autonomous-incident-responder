@@ -38,9 +38,7 @@ public class SreAgentService {
                 config.minScore(),
                 config.temperature());
 
-        var requestBuilder = SearchRequest.builder()
-                .query(request.issue())
-                .topK(config.topK());
+        var requestBuilder = SearchRequest.builder().query(request.issue()).topK(config.topK());
 
         // 1. Conditional Similarity Threshold
         if (config.minScore() > 0) {
