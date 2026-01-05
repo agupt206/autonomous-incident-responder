@@ -43,7 +43,7 @@ public class EmbeddedLogEngine {
                 case "inventory-db-timeout" -> seedInventoryDbTimeout(writer);
                 case "inventory-stock-mismatch" -> seedInventoryStockMismatch(writer);
 
-                // NEW SCENARIOS
+                    // NEW SCENARIOS
                 case "inventory-cache-inconsistency" -> seedInventoryCacheInconsistency(writer);
                 case "payment-gateway-timeout" -> seedPaymentGatewayTimeout(writer);
 
@@ -82,8 +82,14 @@ public class EmbeddedLogEngine {
         for (int i = 0; i < 20; i++) {
             Document doc = new Document();
             doc.add(new TextField("application.name", "inventory-service", Field.Store.YES));
-            doc.add(new TextField("log.message", "WARN: Cache key miss for SKU-999. Fetching from DB.", Field.Store.YES));
-            doc.add(new StringField("db.status", "UP", Field.Store.YES)); // Explicit field for the query
+            doc.add(
+                    new TextField(
+                            "log.message",
+                            "WARN: Cache key miss for SKU-999. Fetching from DB.",
+                            Field.Store.YES));
+            doc.add(
+                    new StringField(
+                            "db.status", "UP", Field.Store.YES)); // Explicit field for the query
             doc.add(new StoredField("trace_id", "cache-miss-" + i));
             w.addDocument(doc);
         }
@@ -97,10 +103,15 @@ public class EmbeddedLogEngine {
             doc.add(new TextField("application.name", "payment-service", Field.Store.YES));
             doc.add(new TextField("status_code", "504", Field.Store.YES));
             doc.add(new StringField("metric", "latency", Field.Store.YES));
-            // Lucene range query logic usually requires IntPoint, but here we simulate text match for the demo
+            // Lucene range query logic usually requires IntPoint, but here we simulate text match
+            // for the demo
             // Or explicitly set value > 5000 as requested by the text parser logic
             doc.add(new StringField("value", "6500", Field.Store.YES));
-            doc.add(new TextField("log.message", "Gateway Timeout awaiting upstream response", Field.Store.YES));
+            doc.add(
+                    new TextField(
+                            "log.message",
+                            "Gateway Timeout awaiting upstream response",
+                            Field.Store.YES));
             doc.add(new StoredField("trace_id", "gw-timeout-" + i));
             w.addDocument(doc);
         }
