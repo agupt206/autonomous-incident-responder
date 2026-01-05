@@ -50,17 +50,22 @@ public class IngestionService implements CommandLineRunner {
 
                 // FIX: Use mutate() to create a new Document with a deterministic ID
                 // and inject the service_name metadata.
-                Document newDoc = originalDoc.mutate()
-                        .id(serviceKey + "_chunk_" + i)
-                        .metadata("service_name", serviceKey)
-                        .build();
+                Document newDoc =
+                        originalDoc
+                                .mutate()
+                                .id(serviceKey + "_chunk_" + i)
+                                .metadata("service_name", serviceKey)
+                                .build();
 
                 processedDocuments.add(newDoc);
             }
 
             // 4. Ingest
             vectorStore.accept(processedDocuments);
-            log.info(">>> Ingested {} documents for '{}' (Idempotent)", processedDocuments.size(), serviceKey);
+            log.info(
+                    ">>> Ingested {} documents for '{}' (Idempotent)",
+                    processedDocuments.size(),
+                    serviceKey);
         }
         log.info(">>> Global Ingestion Complete!");
     }
