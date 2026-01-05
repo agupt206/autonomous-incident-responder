@@ -3,6 +3,7 @@ package com.example.responder;
 import com.example.responder.eval.EvaluationCase;
 import com.example.responder.eval.GoldenDatasetGenerator;
 import com.example.responder.eval.GradingResult;
+import com.example.responder.model.AgentConfig;
 import com.example.responder.model.AnalysisResponse;
 import com.example.responder.model.IncidentRequest;
 import com.example.responder.service.EmbeddedLogEngine;
@@ -79,6 +80,8 @@ public class AgentEvaluationTest {
     void evaluateFullAgentLifecycle(EvaluationCase testCase) {
         System.out.println(">>> Executing Test Case: " + testCase.id());
 
+        var config = AgentConfig.defaults();
+
         AnalysisResponse response = null;
         GradingResult precisionResult = new GradingResult(false, "N/A - Test Crashed");
         GradingResult actionResult = new GradingResult(false, "N/A - Test Crashed");
@@ -95,7 +98,7 @@ public class AgentEvaluationTest {
             response =
                     agent.analyze(
                             new IncidentRequest(
-                                    testCase.serviceName(), testCase.userIssue(), "1h"));
+                                    testCase.serviceName(), testCase.userIssue(), "1h"), config);
 
             // C. EVALUATION
             precisionResult = calculateRetrievalPrecision(testCase, response);
@@ -123,6 +126,7 @@ public class AgentEvaluationTest {
                     new EvaluationReportEntry(
                             testCase,
                             response,
+                            config,
                             precisionResult,
                             actionResult,
                             faithfulnessResult,
@@ -198,6 +202,7 @@ public class AgentEvaluationTest {
     private String formatReportEntry(EvaluationReportEntry entry) throws Exception {
         EvaluationCase tc = entry.testCase();
         AnalysisResponse ar = entry.agentResponse();
+        AgentConfig cfg = entry.config();
 
         String crashInfo = "";
         if (entry.exception() != null) {
@@ -221,6 +226,12 @@ public class AgentEvaluationTest {
                === TEST CASE: %s ===
                SERVICE: %s
                SCENARIO: %s
+               
+               [CONFIGURATION]
+               - TopK: %d
+               - Min Score: %.2f
+               - Temperature: %.2f
+               - Strict Filtering: %s
 
                [INPUT]
                User Query: %s
@@ -247,6 +258,10 @@ public class AgentEvaluationTest {
                         tc.id(),
                         tc.serviceName(),
                         tc.expectedAlertHeader(),
+                        cfg.topK(),
+                        cfg.minScore(),
+                        cfg.temperature(),
+                        cfg.strictMetadataFiltering(),
                         tc.userIssue(),
                         tc.expectedLuceneQuery(),
                         tc.expectedRemediation(),
@@ -266,36 +281,54 @@ public class AgentEvaluationTest {
 
     private GradingResult calculateRetrievalPrecision(
             EvaluationCase testCase, AnalysisResponse response) {
-        if (response.citations() == null)
-            return new GradingResult(false, "No citations found (null)");
+        // 1. Check for empty results
+        if (response.citations() == null || response.citations().isEmpty()) {
+            return new GradingResult(false, "FAIL: No documents retrieved.");
+        }
 
-        boolean precise =
+        // 2. Strict Metadata Matching
+        // We expect the retrieved source to EXACTLY match the service name (e.g.,
+        // "payment-service")
+        // defined in IngestionService.
+        boolean allSourcesMatch =
                 response.citations().stream()
-                        .allMatch(
-                                source ->
-                                        source.toLowerCase()
-                                                .contains(testCase.serviceName().toLowerCase()));
+                        .allMatch(source -> source.equalsIgnoreCase(testCase.serviceName()));
 
-        if (precise) {
-            return new GradingResult(true, "All citations match service context.");
+        if (allSourcesMatch) {
+            return new GradingResult(
+                    true, "PASS: All retrieved fragments belong to " + testCase.serviceName());
         } else {
-            return new GradingResult(false, "Found unrelated citations: " + response.citations());
+            return new GradingResult(
+                    false,
+                    "FAIL: Context Pollution Detected. Retrieved: "
+                            + response.citations()
+                            + " | Expected: "
+                            + testCase.serviceName());
         }
     }
 
     private GradingResult calculateActionCorrectness(
             EvaluationCase testCase, AnalysisResponse response) {
         ChatClient judge = clientBuilder.build();
+
         return judge.prompt()
-                .system("You are a Syntax Judge.")
-                .user(
-                        u ->
-                                u.text(
-                                                "EXPECTED: {e} \n"
-                                                        + " ACTUAL: {a} \n"
-                                                        + " Compare functional equivalence.")
-                                        .param("e", testCase.expectedLuceneQuery())
-                                        .param("a", response.investigationQuery()))
+                .system("You are a strict Lucene Query Syntax Validator.")
+                .user(u -> u.text("""
+                        TASK: Compare the Actual Query against the Expected Query.
+
+                        EXPECTED (Ground Truth): {e}
+                        ACTUAL (Agent Output):   {a}
+
+                        EVALUATION CRITERIA:
+                        1. SYNTAX: The Actual Query MUST be valid Lucene syntax.
+                           - No unescaped special characters.
+                           - Proper field usage (e.g., 'service:"name"').
+                        2. ACCURACY: It must target the same fields and values as Expected.
+
+                        Output JSON: \\{ "pass": boolean, "reasoning": "string" \\}
+                        """)
+                        .param("e", testCase.expectedLuceneQuery())
+                        .param("a", response.investigationQuery()))
                 .call()
                 .entity(GradingResult.class);
     }
@@ -308,14 +341,30 @@ public class AgentEvaluationTest {
             return new GradingResult(false, "FAIL: Agent returned empty remediation steps.");
         }
 
+        // Fixes "Weakness #2": Checks for OMISSION (Recall)
         return judge.prompt()
-                .system("You are a QA Auditor.")
+                .system("You are a QA Lead Auditor.")
                 .user(
                         u ->
                                 u.text(
-                                                "GROUND TRUTH: {gt} \n"
-                                                        + " ACTUAL: {act} \n"
-                                                        + " Check for hallucinations.")
+                                                """
+                        Compare the remediation plans.
+
+                        GROUND TRUTH (Required Steps):
+                        {gt}
+
+                        ACTUAL AGENT OUTPUT:
+                        {act}
+
+                        STRICT GRADING RULES:
+                        1. RECALL: The Agent MUST include ALL steps from the Ground Truth.
+                           - If a step is missing -> FAIL.
+                        2. HALLUCINATION: The Agent must NOT invent new steps not present in the text.
+                           - If new steps are added -> FAIL.
+                        3. ORDER: The logical order must be preserved.
+
+                        Does the Actual plan meet all criteria?
+                        """)
                                         .param(
                                                 "gt",
                                                 String.join("\n", testCase.expectedRemediation()))
@@ -340,6 +389,7 @@ public class AgentEvaluationTest {
     private record EvaluationReportEntry(
             EvaluationCase testCase,
             AnalysisResponse agentResponse,
+            AgentConfig config,
             GradingResult precision,
             GradingResult action,
             GradingResult faithfulness,

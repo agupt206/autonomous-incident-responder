@@ -1,5 +1,6 @@
 package com.example.responder.service;
 
+import com.example.responder.model.AgentConfig;
 import com.example.responder.model.AnalysisResponse;
 import com.example.responder.model.IncidentRequest;
 import java.util.List;
@@ -26,21 +27,33 @@ public class SreAgentService {
     }
 
     public AnalysisResponse analyze(IncidentRequest request) {
+        return analyze(request, AgentConfig.defaults());
+    }
+
+    public AnalysisResponse analyze(IncidentRequest request, AgentConfig config) {
         log.info(
-                ">>> AGENT START: Analyzing issue '{}' for service '{}'",
+                ">>> AGENT START: Analyzing '{}' (Config: TopK={}, Score={}, Temp={})",
                 request.issue(),
-                request.serviceName());
+                config.topK(),
+                config.minScore(),
+                config.temperature());
 
-        // String serviceKey = request.serviceName().toLowerCase().replace(" ", "-");
+        var requestBuilder = SearchRequest.builder()
+                .query(request.issue())
+                .topK(config.topK());
 
-        SearchRequest searchRequest =
-                SearchRequest.builder()
-                        .query(request.issue())
-                        .topK(2)
-                        // .filterExpression("service_name == '" + serviceKey + "'")
-                        .build();
+        // 1. Conditional Similarity Threshold
+        if (config.minScore() > 0) {
+            requestBuilder.similarityThreshold(config.minScore());
+        }
 
-        List<Document> similarDocuments = vectorStore.similaritySearch(searchRequest);
+        // 2. Conditional Metadata Filtering
+        if (config.strictMetadataFiltering()) {
+            String serviceKey = request.serviceName().toLowerCase().replace(" ", "-");
+            requestBuilder.filterExpression("service_name == '" + serviceKey + "'");
+        }
+
+        List<Document> similarDocuments = vectorStore.similaritySearch(requestBuilder.build());
 
         List<String> retrievedSources =
                 similarDocuments.stream()
@@ -52,7 +65,19 @@ public class SreAgentService {
                         .distinct()
                         .toList();
 
-        // FIX 2: Explicit Visual Separators for the Context
+        if (similarDocuments.isEmpty()) {
+            return new AnalysisResponse(
+                    "UNKNOWN",
+                    "No relevant runbooks found (Score < " + config.minScore() + ")",
+                    "N/A",
+                    java.util.Map.of(),
+                    "SRE-General",
+                    java.util.List.of("Escalate to human operator manually."),
+                    true,
+                    java.util.List.of());
+        }
+
+        // Explicit Visual Separators for the Context
         // This prevents the "Frankenstein" issue where the LLM reads the Query from Doc A
         // but the Remediation Steps from Doc B.
         String context =
@@ -66,7 +91,7 @@ public class SreAgentService {
 
         String timeWindow = request.timeWindow() != null ? request.timeWindow() : "1h";
 
-        // FIX 3: Strict "Source of Truth" Prompting
+        // Strict "Source of Truth" Prompting
         var aiGeneratedResponse =
                 this.chatClient
                         .prompt()
