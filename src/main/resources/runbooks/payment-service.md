@@ -32,3 +32,19 @@ service:"payment-service" AND metric:latency AND value > 2000
 **2. If health is UP, escalate to the Payment Service Team via Slack channel #payment-platform.**
 
 **3. Do not restart the payment service, as this will drop active transactions.**
+
+----
+
+## Alert: Gateway Timeout
+### 1. Detection Logic
+**Query:**
+```lucene
+service:"payment-service" AND status_code:504 AND metric:latency > 5000
+``` 
+
+### 2. Remediation
+**1. Check if the upstream provider (Stripe/PayPal) status page reports outages.**
+
+**2. If upstream is green, check internal firewall logs for dropped packets.**
+
+**3. Scale up the payment-gateway pods by 50% to handle retry storms.**

@@ -34,28 +34,22 @@ public class EmbeddedLogEngine {
     /** Wipes the existing index and seeds new data based on the requested simulation scenario. */
     public void loadScenario(String scenarioName) {
         log.info(">>> SIMULATION: Switching Log Engine to Scenario: '{}'", scenarioName);
-
         try (IndexWriter writer = new IndexWriter(memoryIndex, new IndexWriterConfig(analyzer))) {
-            // 1. Clear existing data
             writer.deleteAll();
-
-            // 2. Seed new data based on scenario
             switch (scenarioName.toLowerCase()) {
                 case "healthy" -> seedHealthy(writer);
-
-                    // --- Payment Scenarios ---
                 case "payment-500-npe" -> seedPaymentNPE(writer);
                 case "payment-latency" -> seedPaymentLatency(writer);
-
-                    // --- Inventory Scenarios ---
                 case "inventory-db-timeout" -> seedInventoryDbTimeout(writer);
                 case "inventory-stock-mismatch" -> seedInventoryStockMismatch(writer);
 
+                // NEW SCENARIOS
+                case "inventory-cache-inconsistency" -> seedInventoryCacheInconsistency(writer);
+                case "payment-gateway-timeout" -> seedPaymentGatewayTimeout(writer);
+
                 default -> log.warn("Unknown scenario '{}', leaving index empty.", scenarioName);
             }
-
-            writer.commit(); // Ensure changes are visible to readers
-
+            writer.commit();
         } catch (IOException e) {
             log.error("Failed to load scenario", e);
         }
@@ -80,6 +74,36 @@ public class EmbeddedLogEngine {
                 "opentracing-log",
                 "tx-ok-2",
                 "Stock updated");
+    }
+
+    private void seedInventoryCacheInconsistency(IndexWriter w) throws IOException {
+        // Goal: DB is fine (UP), but app is complaining about cache misses or stale data
+        // Query: service:"inventory-service" AND log.message:"Cache key miss" AND db.status:"UP"
+        for (int i = 0; i < 20; i++) {
+            Document doc = new Document();
+            doc.add(new TextField("application.name", "inventory-service", Field.Store.YES));
+            doc.add(new TextField("log.message", "WARN: Cache key miss for SKU-999. Fetching from DB.", Field.Store.YES));
+            doc.add(new StringField("db.status", "UP", Field.Store.YES)); // Explicit field for the query
+            doc.add(new StoredField("trace_id", "cache-miss-" + i));
+            w.addDocument(doc);
+        }
+    }
+
+    private void seedPaymentGatewayTimeout(IndexWriter w) throws IOException {
+        // Goal: 504 errors and high latency
+        // Query: service:"payment-service" AND status_code:504 AND metric:latency > 5000
+        for (int i = 0; i < 15; i++) {
+            Document doc = new Document();
+            doc.add(new TextField("application.name", "payment-service", Field.Store.YES));
+            doc.add(new TextField("status_code", "504", Field.Store.YES));
+            doc.add(new StringField("metric", "latency", Field.Store.YES));
+            // Lucene range query logic usually requires IntPoint, but here we simulate text match for the demo
+            // Or explicitly set value > 5000 as requested by the text parser logic
+            doc.add(new StringField("value", "6500", Field.Store.YES));
+            doc.add(new TextField("log.message", "Gateway Timeout awaiting upstream response", Field.Store.YES));
+            doc.add(new StoredField("trace_id", "gw-timeout-" + i));
+            w.addDocument(doc);
+        }
     }
 
     private void seedPaymentNPE(IndexWriter w) throws IOException {

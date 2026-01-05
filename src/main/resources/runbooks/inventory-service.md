@@ -22,7 +22,6 @@ service:"inventory-service" AND log.message:"Connection check failed" AND db.typ
 
 ----
 
-
 ## Alert: Elevated 5xx Error Rate
 
 ### 1. Detection Logic (ELF Query)
@@ -41,4 +40,22 @@ service:"inventory-service" AND status_code:[500 TO 599] AND log.level:ERROR
 
 **4. If NullPointerException: This indicates a code bug. Escalate to Supply Chain Engineering immediately.**
 
-**Step #5. If the healthCheck returns "UP" but errors persist > 5%, assume a downstream dependency failure (e.g., Warehouse API).**
+**5. If the healthCheck returns "UP" but errors persist > 5%, assume a downstream dependency failure (e.g., Warehouse API).**
+
+----
+
+## Alert: Cache Inconsistency
+### 1. Detection Logic (ELF Query)
+**Time Period:** 15 minutes
+**Query:**
+```lucene
+service:"inventory-service" AND log.message:"Cache key miss" AND db.status:"UP"
+``` 
+### 2. Remediation
+**1. Verify Database is healthy using healthCheck tool.**
+
+**2. If Database is UP but users see old data, flush the Redis cache.**
+
+**3. Command: redis-cli -h inv-cache-prod FLUSHALL.**
+
+**4. Restart the inventory-service to repopulate local caffeine caches.**
