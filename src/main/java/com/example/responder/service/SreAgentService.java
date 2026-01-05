@@ -37,7 +37,7 @@ public class SreAgentService {
         // We filter by 'service_name' metadata to ensure we only get the correct Runbook.
         // This prevents the "Inventory" runbook from polluting the "Payment" analysis.
         // TODO: uncomment after implementing RAG eval
-        // String serviceKey = request.serviceName().toLowerCase().replace(" ", "-");
+        String serviceKey = request.serviceName().toLowerCase().replace(" ", "-");
         // String safeIssue = safeTruncate(request.issue(), 100);
 
         SearchRequest searchRequest =
@@ -45,7 +45,7 @@ public class SreAgentService {
                         .query(request.issue())
                         .topK(2)
                         // TODO: uncomment after implementing RAG eval
-                        // .filterExpression("service_name == '" + serviceKey + "'")
+                        .filterExpression("service_name == '" + serviceKey + "'")
                         .build();
 
         List<Document> similarDocuments = vectorStore.similaritySearch(searchRequest);
@@ -78,45 +78,33 @@ public class SreAgentService {
                                 u ->
                                         u.text(
                                                         """
-                    You are a Process-Aware SRE Agent. Your job is to analyze incidents strictly following the provided RUNBOOKS.
+                    You are an SRE Incident Analyzer. Your task is to map a User Issue to a specific Runbook Alert and extract structured remediation data.
 
                     INPUT CONTEXT:
                     - Service: {service}
                     - User Issue: {issue}
                     - Time Window: {timeWindow}
 
-                    RUNBOOK CONTENT (Markdown):
+                    RUNBOOK CONTENT:
                     {context}
 
                     ---------------------------------------------------------
-                    INSTRUCTIONS (Follow this Sequence):
+                    LOGIC & EXTRACTION RULES:
 
-                    PHASE 1: TRIAGE (Pulse Check)
-                    1. Call the 'healthCheck' tool for the service.
-                    2. IF 'DOWN': The issue is critical availability.
-                    3. IF 'UP': The issue is likely logic/performance (proceed to investigation).
-
-                    PHASE 2: INVESTIGATION (Forensics)
-                    1. Read the Runbook provided in context. Find the section that matches the User Issue.
-                    2. EXTRACT the Lucene Query from the ```lucene code block in that section.
-                    3. CALL the 'searchElfLogs' tool using that exact query and the time window.
-                    4. ANALYZE the tool's output (Match Count, Trace IDs).
-
-                    PHASE 3: REPORTING (Final Answer)
-                    1. Map your findings into the JSON structure below.
+                    1. **Identify the Alert**: Match the User Issue to the most relevant 'Alert' section in the Runbook.
+                    2. **Extract Query**: Copy the Lucene query from the chosen section exactly.
+                    3. **Extract Steps**: Copy the Remediation steps exactly as a list of strings. Do not summarize.
+                    4. **Pulse Check**:
+                       - Internal Logic: Imagine calling 'healthCheck'.
+                       - If the issue implies the service is totally dead, 'rootCauseHypothesis' should reflect critical availability.
+                       - If the issue implies errors/slowness, 'rootCauseHypothesis' should reflect performance/logic issues.
 
                     ---------------------------------------------------------
-                    JSON MAPPING RULES:
-                    - 'failureType': The header of the matching Alert section (e.g. "Elevated 5xx Error Rate").
-                    - 'rootCauseHypothesis': Synthesize the Health Status + Log Search Results (e.g., "Service is UP, but logs show 142 500-errors").
-                    - 'investigationQuery': The exact Lucene string you extracted.
-                    - 'responsibleTeam': The specific team mentioned in the 'Escalation' section.
-                    - 'evidence': A key-value map.
-                        * Key: "Trace IDs" -> Value: List from log tool.
-                        * Key: "Match Count" -> Value: Number from log tool.
-                        * Key: "Health Status" -> Value: Result of healthCheck tool.
-                    - 'remediationSteps': The exact list of steps found in the 'Remediation' section. Do not summarize or combine steps; extract them as individual items."
-                    - 'requiresEscalation': True if the Runbook says to escalate or if severity is Critical.
+                    OUTPUT REQUIREMENT:
+                    Generate a valid JSON object matching the requested schema.
+                    - failureType: The exact header of the matched Alert.
+                    - investigationQuery: The Lucene query (use double quotes for strings).
+                    - remediationSteps: JSON Array of strings containing the exact text of the steps.
                     """)
                                                 .param("service", request.serviceName())
                                                 .param("issue", request.issue())
