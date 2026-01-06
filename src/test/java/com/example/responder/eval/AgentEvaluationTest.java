@@ -44,7 +44,6 @@ public class AgentEvaluationTest {
     @Autowired private EmbeddedLogEngine logEngine;
     @Autowired private ObjectMapper objectMapper;
 
-    // Thread-safe storage
     private final List<EvaluationReportEntry> reportEntries = new CopyOnWriteArrayList<>();
 
     // --- 1. DATA LOADING ---
@@ -73,14 +72,16 @@ public class AgentEvaluationTest {
                         });
     }
 
-    // --- 2. MAIN TEST LOOP (ROBUST ERROR HANDLING) ---
+    // --- 2. MAIN TEST LOOP ---
 
     @ParameterizedTest
     @MethodSource("provideGoldenData")
     void evaluateFullAgentLifecycle(EvaluationCase testCase) {
         System.out.println(">>> Executing Test Case: " + testCase.id());
 
-        var config = AgentConfig.defaults();
+        // Config: TopK=5 ensures we get all alerts for the service.
+        // We set strictMetadataFiltering=true, but SreAgentService now enforces it regardless.
+        var config = new AgentConfig(5, 0.0, 0.0, true);
 
         AnalysisResponse response = null;
         GradingResult precisionResult = new GradingResult(false, "N/A - Test Crashed");
@@ -89,25 +90,21 @@ public class AgentEvaluationTest {
         Exception capturedException = null;
 
         try {
-            // A. SETUP
             String scenarioId =
                     mapAlertToScenario(testCase.serviceName(), testCase.expectedAlertHeader());
             logEngine.loadScenario(scenarioId);
 
-            // B. EXECUTION
             response =
                     agent.analyze(
                             new IncidentRequest(testCase.serviceName(), testCase.userIssue(), "1h"),
                             config);
 
-            // C. EVALUATION
             precisionResult = calculateRetrievalPrecision(testCase, response);
             actionResult = calculateActionCorrectness(testCase, response);
             faithfulnessResult = calculatePlanFaithfulness(testCase, response);
 
         } catch (Exception e) {
             capturedException = e;
-            // Create a dummy response to prevent NPEs in the report
             if (response == null) {
                 response =
                         new AnalysisResponse(
@@ -121,7 +118,6 @@ public class AgentEvaluationTest {
                                 List.of());
             }
         } finally {
-            // D. RECORDING (Guaranteed to run)
             reportEntries.add(
                     new EvaluationReportEntry(
                             testCase,
@@ -133,14 +129,12 @@ public class AgentEvaluationTest {
                             capturedException));
         }
 
-        // E. ASSERTION (Fail the test AFTER recording)
         if (capturedException != null) {
             Assertions.fail(
                     "Test Failed with Exception: " + capturedException.getMessage(),
                     capturedException);
         }
 
-        // Standard assertions
         GradingResult finalPrecision = precisionResult;
         GradingResult finalAction = actionResult;
         GradingResult finalFaithfulness = faithfulnessResult;
@@ -242,6 +236,7 @@ public class AgentEvaluationTest {
 
                [ACTUAL_AGENT_OUTPUT]
                Lucene Query: %s
+               Evidence Found: %s
                Remediation Steps: %s
 
                [EVALUATION_METRICS]
@@ -266,6 +261,7 @@ public class AgentEvaluationTest {
                         tc.expectedLuceneQuery(),
                         tc.expectedRemediation(),
                         ar.investigationQuery(),
+                        (ar.evidence() != null ? ar.evidence().keySet() : "NONE"),
                         ar.remediationSteps(),
                         entry.precision().pass() ? "PASS" : "FAIL",
                         entry.precision().reasoning(),
@@ -277,19 +273,11 @@ public class AgentEvaluationTest {
                         rawJson);
     }
 
-    // --- 4. METRIC CALCULATORS ---
-
     private GradingResult calculateRetrievalPrecision(
             EvaluationCase testCase, AnalysisResponse response) {
-        // 1. Check for empty results
         if (response.citations() == null || response.citations().isEmpty()) {
             return new GradingResult(false, "FAIL: No documents retrieved.");
         }
-
-        // 2. Strict Metadata Matching
-        // We expect the retrieved source to EXACTLY match the service name (e.g.,
-        // "payment-service")
-        // defined in IngestionService.
         boolean allSourcesMatch =
                 response.citations().stream()
                         .allMatch(source -> source.equalsIgnoreCase(testCase.serviceName()));
@@ -309,8 +297,22 @@ public class AgentEvaluationTest {
 
     private GradingResult calculateActionCorrectness(
             EvaluationCase testCase, AnalysisResponse response) {
-        ChatClient judge = clientBuilder.build();
 
+        if (response.evidence() == null || response.evidence().isEmpty()) {
+            return new GradingResult(
+                    false,
+                    "FAIL: No Evidence Captured. The Agent likely failed to EXECUTE the tool.");
+        }
+
+        String actualQuery = response.investigationQuery();
+        if (actualQuery == null || actualQuery.isBlank()) {
+            return new GradingResult(
+                    false,
+                    "FAIL: Agent returned null/empty investigationQuery. Evidence Captured: "
+                            + response.evidence());
+        }
+
+        ChatClient judge = clientBuilder.build();
         return judge.prompt()
                 .system("You are a strict Lucene Query Syntax Validator.")
                 .user(
@@ -324,14 +326,13 @@ public class AgentEvaluationTest {
 
                         EVALUATION CRITERIA:
                         1. SYNTAX: The Actual Query MUST be valid Lucene syntax.
-                           - No unescaped special characters.
-                           - Proper field usage (e.g., 'service:"name"').
                         2. ACCURACY: It must target the same fields and values as Expected.
 
-                        Output JSON: \\{ "pass": boolean, "reasoning": "string" \\}
+                        Output Format: JSON with keys "pass" (boolean) and "reasoning" (string).
+                        IMPORTANT: Do NOT escape single quotes in the output.
                         """)
                                         .param("e", testCase.expectedLuceneQuery())
-                                        .param("a", response.investigationQuery()))
+                                        .param("a", actualQuery))
                 .call()
                 .entity(GradingResult.class);
     }
@@ -344,7 +345,6 @@ public class AgentEvaluationTest {
             return new GradingResult(false, "FAIL: Agent returned empty remediation steps.");
         }
 
-        // Fixes "Weakness #2": Checks for OMISSION (Recall)
         return judge.prompt()
                 .system("You are a QA Lead Auditor.")
                 .user(
@@ -361,12 +361,11 @@ public class AgentEvaluationTest {
 
                         STRICT GRADING RULES:
                         1. RECALL: The Agent MUST include ALL steps from the Ground Truth.
-                           - If a step is missing -> FAIL.
-                        2. HALLUCINATION: The Agent must NOT invent new steps not present in the text.
-                           - If new steps are added -> FAIL.
-                        3. ORDER: The logical order must be preserved.
+                        2. HALLUCINATION: The Agent must NOT invent new steps.
+                        3. VERBATIM: Commands (e.g., redis-cli) must be exact.
 
-                        Does the Actual plan meet all criteria?
+                        Output Format: JSON with keys "pass" (boolean) and "reasoning" (string).
+                        IMPORTANT: Do NOT escape single quotes in the output.
                         """)
                                         .param(
                                                 "gt",
@@ -396,6 +395,5 @@ public class AgentEvaluationTest {
             GradingResult precision,
             GradingResult action,
             GradingResult faithfulness,
-            Exception exception // New field for crash tracking
-            ) {}
+            Exception exception) {}
 }

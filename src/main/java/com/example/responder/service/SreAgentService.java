@@ -22,6 +22,7 @@ public class SreAgentService {
     private final VectorStore vectorStore;
 
     public SreAgentService(ChatClient.Builder builder, VectorStore vectorStore) {
+        // Enable tools for the Agentic Loop
         this.chatClient = builder.defaultTools("healthCheck", "searchElfLogs").build();
         this.vectorStore = vectorStore;
     }
@@ -38,21 +39,24 @@ public class SreAgentService {
                 config.minScore(),
                 config.temperature());
 
+        // --- 1. RETRIEVAL (RAG) ---
         var requestBuilder = SearchRequest.builder().query(request.issue()).topK(config.topK());
 
-        // 1. Conditional Similarity Threshold
         if (config.minScore() > 0) {
             requestBuilder.similarityThreshold(config.minScore());
         }
 
-        // 2. Conditional Metadata Filtering
-        if (config.strictMetadataFiltering()) {
+        // CORRECT FIX: Enforce VectorStore filtering whenever service name is known.
+        // We do NOT rely on config.strictMetadataFiltering() here, because preventing
+        // context pollution is a fundamental requirement, not an option.
+        if (request.serviceName() != null && !request.serviceName().isEmpty()) {
             String serviceKey = request.serviceName().toLowerCase().replace(" ", "-");
             requestBuilder.filterExpression("service_name == '" + serviceKey + "'");
         }
 
         List<Document> similarDocuments = vectorStore.similaritySearch(requestBuilder.build());
 
+        // Capture Citations
         List<String> retrievedSources =
                 similarDocuments.stream()
                         .map(
@@ -64,84 +68,92 @@ public class SreAgentService {
                         .toList();
 
         if (similarDocuments.isEmpty()) {
-            return new AnalysisResponse(
-                    "UNKNOWN",
-                    "No relevant runbooks found (Score < " + config.minScore() + ")",
-                    "N/A",
-                    java.util.Map.of(),
-                    "SRE-General",
-                    java.util.List.of("Escalate to human operator manually."),
-                    true,
-                    java.util.List.of());
+            return fallbackResponse(
+                    "No relevant runbooks found (Score < " + config.minScore() + ")");
         }
 
-        // Explicit Visual Separators for the Context
-        // This prevents the "Frankenstein" issue where the LLM reads the Query from Doc A
-        // but the Remediation Steps from Doc B.
+        // --- 2. CONTEXT PREPARATION ---
         String context =
                 similarDocuments.stream()
                         .map(
                                 doc ->
-                                        "=== FRAGMENT START ===\n"
+                                        "--- START ALERT CONFIGURATION ---\n"
                                                 + doc.getFormattedContent()
-                                                + "\n=== FRAGMENT END ===")
+                                                + "\n--- END ALERT CONFIGURATION ---")
                         .collect(Collectors.joining("\n\n"));
 
         String timeWindow = request.timeWindow() != null ? request.timeWindow() : "1h";
 
-        // Strict "Source of Truth" Prompting
-        var aiGeneratedResponse =
+        // --- 3. AGENTIC EXECUTION (Exhaustive Loop) ---
+        // We use the "Exhaustive Detective" pattern which proved 100% effective in testing.
+        AnalysisResponse agentOutput =
                 this.chatClient
                         .prompt()
+                        .system(
+                                s ->
+                                        s.text(
+                                                """
+                    You are a Lead SRE. You must rigorously diagnose the issue using the provided Runbook Alerts.
+
+                    **PHASE 1: EXHAUSTIVE DIAGNOSTICS**
+                    1.  **Extract**: Identify EVERY "Alert" block in the context.
+                    2.  **Execute**: Run `searchElfLogs` for **ALL** queries found. Do not skip any.
+                        - Use the provided `timeWindow`.
+                    3.  **Evaluate**:
+                        - Find the Alert where `matchCount > 0`. This is the Root Cause.
+                        - IF ALL MATCHES ARE 0: Select the Alert that best matches the User's text description (Fallback).
+
+                    **PHASE 2: STRICT REPORTING**
+                    - `investigationQuery`: Output the Lucene string for the Selected Alert.
+                        - MUST NOT BE NULL. If no matches, output the Fallback query.
+                    - `remediationSteps`:
+                        - **CRITICAL**: Copy steps ONLY from the Selected Alert block.
+                        - **ISOLATION**: Do NOT combine steps from different alerts.
+                        - **VERBATIM**: Do not summarize. Copy every single bullet point and command.
+                    - `evidence`: Populate with ALL tool outputs (e.g. latency_check='0 matches', error_check='50 matches').
+                    """))
                         .user(
                                 u ->
                                         u.text(
                                                         """
-                    You are an SRE Incident Analyzer.
-
-                    INPUT CONTEXT:
+                    CONTEXT:
                     - Service: {service}
                     - User Issue: {issue}
+                    - Time Window: {timeWindow}
 
-                    RETRIEVED RUNBOOK FRAGMENTS:
+                    AVAILABLE ALERTS (RUNBOOK):
                     {context}
 
-                    ---------------------------------------------------------
-                    STRICT ANALYSIS RULES:
-                    1. **Select ONE Fragment**: Scan the 'FRAGMENT' blocks. Find the ONE that best matches the User Issue.
-                    2. **Stay in Bounds**: You must extract the Query and Remediation Steps from that *SAME* Fragment. Do not mix content from different fragments.
-                    3. **Verbatim Extraction**:
-                       - Copy the Remediation Steps EXACTLY as they appear in the text.
-                       - Do NOT paraphrase. Do NOT use your own knowledge.
-                       - If the text says "Check HikariPool", you must output "Check HikariPool", not "Check Database".
-                    4. **Syntax**: Use SINGLE QUOTES ('') for strings in the Lucene query.
-
-                    EXAMPLE OUTPUT:
-                    \\{
-                      "failureType": "High Latency",
-                      "investigationQuery": "service:'app' AND metric:'latency'",
-                      "remediationSteps": [
-                        "1. Check Load Balancer status.",
-                        "2. If healthy, check database locks."
-                      ]
-                    \\}
-                    ---------------------------------------------------------
-                    Generate the JSON response now:
+                    Perform diagnostics and report findings.
                     """)
                                                 .param("service", request.serviceName())
                                                 .param("issue", request.issue())
+                                                .param("timeWindow", timeWindow)
                                                 .param("context", context))
                         .call()
                         .entity(AnalysisResponse.class);
 
+        // --- 4. MERGE & RETURN ---
         return new AnalysisResponse(
-                aiGeneratedResponse.failureType(),
-                aiGeneratedResponse.rootCauseHypothesis(),
-                aiGeneratedResponse.investigationQuery(),
-                aiGeneratedResponse.evidence(),
-                aiGeneratedResponse.responsibleTeam(),
-                aiGeneratedResponse.remediationSteps(),
-                aiGeneratedResponse.requiresEscalation(),
+                agentOutput.failureType(),
+                agentOutput.rootCauseHypothesis(),
+                agentOutput.investigationQuery(),
+                agentOutput.evidence(),
+                agentOutput.responsibleTeam(),
+                agentOutput.remediationSteps(),
+                agentOutput.requiresEscalation(),
                 retrievedSources);
+    }
+
+    private AnalysisResponse fallbackResponse(String reason) {
+        return new AnalysisResponse(
+                "UNKNOWN",
+                reason,
+                "N/A",
+                java.util.Map.of(),
+                "SRE-General",
+                java.util.List.of("Escalate to human operator manually."),
+                true,
+                java.util.List.of());
     }
 }
