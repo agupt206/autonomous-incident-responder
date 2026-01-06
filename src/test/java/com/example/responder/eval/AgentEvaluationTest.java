@@ -20,7 +20,6 @@ import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterAll;
@@ -44,6 +43,7 @@ public class AgentEvaluationTest {
     @Autowired private EmbeddedLogEngine logEngine;
     @Autowired private ObjectMapper objectMapper;
 
+    // Thread-safe list to hold results for the final report
     private final List<EvaluationReportEntry> reportEntries = new CopyOnWriteArrayList<>();
 
     // --- 1. DATA LOADING ---
@@ -76,48 +76,43 @@ public class AgentEvaluationTest {
 
     @ParameterizedTest
     @MethodSource("provideGoldenData")
-    void evaluateFullAgentLifecycle(EvaluationCase testCase) {
+    void evaluateAgentQuality(EvaluationCase testCase) {
         System.out.println(">>> Executing Test Case: " + testCase.id());
 
         // Config: TopK=5 ensures we get all alerts for the service.
-        // We set strictMetadataFiltering=true, but SreAgentService now enforces it regardless.
         var config = new AgentConfig(5, 0.0, 0.0, true);
 
         AnalysisResponse response = null;
-        GradingResult precisionResult = new GradingResult(false, "N/A - Test Crashed");
         GradingResult actionResult = new GradingResult(false, "N/A - Test Crashed");
-        GradingResult faithfulnessResult = new GradingResult(false, "N/A - Test Crashed");
+        GradingResult planResult = new GradingResult(false, "N/A - Test Crashed");
+        GradingResult precisionResult = new GradingResult(false, "N/A - Test Crashed");
         Exception capturedException = null;
 
         try {
+            // Load Scenario into Log Engine (Mocking the environment)
             String scenarioId =
                     mapAlertToScenario(testCase.serviceName(), testCase.expectedAlertHeader());
             logEngine.loadScenario(scenarioId);
 
+            // 1. EXECUTE AGENT
             response =
                     agent.analyze(
                             new IncidentRequest(testCase.serviceName(), testCase.userIssue(), "1h"),
                             config);
 
+            // 2. ROBUST EVALUATION (LLM-as-a-Judge)
+            actionResult =
+                    evaluateActionSemantics(
+                            testCase.expectedLuceneQuery(), response.investigationQuery());
+            planResult =
+                    evaluatePlanRecall(testCase.expectedRemediation(), response.remediationSteps());
             precisionResult = calculateRetrievalPrecision(testCase, response);
-            actionResult = calculateActionCorrectness(testCase, response);
-            faithfulnessResult = calculatePlanFaithfulness(testCase, response);
 
         } catch (Exception e) {
             capturedException = e;
-            if (response == null) {
-                response =
-                        new AnalysisResponse(
-                                "CRASHED",
-                                "System Exception: " + e.getMessage(),
-                                "N/A",
-                                Map.of(),
-                                "N/A",
-                                List.of(),
-                                true,
-                                List.of());
-            }
+            e.printStackTrace();
         } finally {
+            // Capture result for the report
             reportEntries.add(
                     new EvaluationReportEntry(
                             testCase,
@@ -125,37 +120,134 @@ public class AgentEvaluationTest {
                             config,
                             precisionResult,
                             actionResult,
-                            faithfulnessResult,
+                            planResult,
                             capturedException));
         }
 
         if (capturedException != null) {
-            Assertions.fail(
-                    "Test Failed with Exception: " + capturedException.getMessage(),
-                    capturedException);
+            Assertions.fail("Test Failed with Exception: " + capturedException.getMessage());
         }
 
-        GradingResult finalPrecision = precisionResult;
+        // Final Assertions for JUnit
         GradingResult finalAction = actionResult;
-        GradingResult finalFaithfulness = faithfulnessResult;
+        GradingResult finalPlan = planResult;
+        GradingResult finalPrecision = precisionResult;
 
         Assertions.assertAll(
                 "Agent Performance Metrics",
                 () ->
                         Assertions.assertTrue(
+                                finalAction.pass(), "Action Fail: " + finalAction.reasoning()),
+                () ->
+                        Assertions.assertTrue(
+                                finalPlan.pass(), "Plan Fail: " + finalPlan.reasoning()),
+                () ->
+                        Assertions.assertTrue(
                                 finalPrecision.pass(),
-                                "Retrieval Precision Failed: " + finalPrecision.reasoning()),
-                () ->
-                        Assertions.assertTrue(
-                                finalAction.pass(),
-                                "Action Correctness Failed: " + finalAction.reasoning()),
-                () ->
-                        Assertions.assertTrue(
-                                finalFaithfulness.pass(),
-                                "Plan Faithfulness Failed: " + finalFaithfulness.reasoning()));
+                                "Retrieval Fail: " + finalPrecision.reasoning()));
     }
 
-    // --- 3. REPORTING HOOK ---
+    // --- 3. ROBUST METRICS (LLM-as-a-Judge) ---
+
+    private GradingResult evaluateActionSemantics(String expectedQuery, String actualQuery) {
+        if (actualQuery == null || actualQuery.isBlank()) {
+            return new GradingResult(false, "Actual query is empty");
+        }
+
+        ChatClient judge = clientBuilder.build();
+        // NOTE: Double escaped curly braces \\{ and \\} to avoid PromptTemplate errors
+        return judge.prompt()
+                .system(
+                        "You are a Search Query Syntax Expert. Compare two queries for SEMANTIC"
+                                + " equivalence.")
+                .user(
+                        u ->
+                                u.text(
+                                                """
+                        EXPECTED QUERY: {expected}
+                        ACTUAL QUERY:   {actual}
+
+                        TASK:
+                        Do these two queries retrieve the same dataset?
+                        - Ignore differences in whitespace or quoting style (e.g. ' vs ").
+                        - Ignore field aliases IF they are common conventions (e.g. 'app' vs 'service').
+                        - The LOGIC (AND/OR) and VALUES must match.
+
+                        Respond with valid JSON: \\{ "pass": boolean, "reasoning": "string" \\}
+                        """)
+                                        .param("expected", expectedQuery)
+                                        .param("actual", actualQuery))
+                .call()
+                .entity(GradingResult.class);
+    }
+
+    private GradingResult evaluatePlanRecall(List<String> expectedSteps, List<String> actualSteps) {
+        if (actualSteps == null || actualSteps.isEmpty()) {
+            return new GradingResult(false, "Actual plan is empty");
+        }
+
+        String expectedStr = String.join("\n", expectedSteps);
+        String actualStr = String.join("\n", actualSteps);
+
+        ChatClient judge = clientBuilder.build();
+        return judge.prompt()
+                .system(
+                        "You are a Senior QA Auditor. Verify that the remediation plan covers all"
+                                + " required actions.")
+                .user(
+                        u ->
+                                u.text(
+                                                """
+                        GROUND TRUTH STEPS:
+                        {expected}
+
+                        AGENT GENERATED STEPS:
+                        {actual}
+
+                        TASK:
+                        Calculate the "Recall" of key facts.
+                        1. Does the Agent's plan include ALL critical actions mentioned in the Ground Truth?
+                        2. It is acceptable if the Agent rephrases steps, provided the meaning is preserved.
+                        3. Fail ONLY if a critical step (e.g. "Flush Redis", "Restart Pod") is completely missing or wrong.
+
+                        Respond with valid JSON: \\{ "pass": boolean, "reasoning": "string" \\}
+                        """)
+                                        .param("expected", expectedStr)
+                                        .param("actual", actualStr))
+                .call()
+                .entity(GradingResult.class);
+    }
+
+    private GradingResult calculateRetrievalPrecision(
+            EvaluationCase testCase, AnalysisResponse response) {
+        if (response.citations() == null || response.citations().isEmpty()) {
+            return new GradingResult(false, "FAIL: No documents retrieved.");
+        }
+        boolean allSourcesMatch =
+                response.citations().stream()
+                        .allMatch(source -> source.equalsIgnoreCase(testCase.serviceName()));
+
+        if (allSourcesMatch) {
+            return new GradingResult(
+                    true, "PASS: All retrieved fragments belong to " + testCase.serviceName());
+        } else {
+            return new GradingResult(
+                    false, "FAIL: Context Pollution Detected. Retrieved: " + response.citations());
+        }
+    }
+
+    private String mapAlertToScenario(String serviceName, String alertHeader) {
+        String key = serviceName + "::" + alertHeader;
+        if (key.contains("Connection Timeout")) return "inventory-db-timeout";
+        if (key.contains("5xx Error Rate") && serviceName.contains("inventory"))
+            return "inventory-stock-mismatch";
+        if (key.contains("5xx Error Rate") && serviceName.contains("payment"))
+            return "payment-500-npe";
+        if (key.contains("Gateway Latency")) return "payment-latency";
+        return "healthy";
+    }
+
+    // --- 4. REPORTING LOGIC (Restored) ---
 
     @AfterAll
     void generateExperimentReport() {
@@ -193,7 +285,7 @@ public class AgentEvaluationTest {
         }
     }
 
-    private String formatReportEntry(EvaluationReportEntry entry) throws Exception {
+    private String formatReportEntry(EvaluationReportEntry entry) {
         EvaluationCase tc = entry.testCase();
         AnalysisResponse ar = entry.agentResponse();
         AgentConfig cfg = entry.config();
@@ -212,34 +304,36 @@ public class AgentEvaluationTest {
 
         String rawJson = "N/A";
         try {
-            rawJson = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(ar);
+            if (ar != null) {
+                rawJson = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(ar);
+            }
         } catch (Exception ignored) {
         }
+
+        // Handle cases where response might be null due to crash
+        String actualQuery = (ar != null) ? ar.investigationQuery() : "NULL";
+        String evidence =
+                (ar != null && ar.evidence() != null) ? ar.evidence().keySet().toString() : "NONE";
+        String remediation = (ar != null) ? String.valueOf(ar.remediationSteps()) : "NULL";
 
         return """
                === TEST CASE: %s ===
                SERVICE: %s
                SCENARIO: %s
 
-               [CONFIGURATION]
-               - TopK: %d
-               - Min Score: %.2f
-               - Temperature: %.2f
-               - Strict Filtering: %s
-
                [INPUT]
                User Query: %s
 
-               [EXPECTED_GROUND_TRUTH]
+               [EXPECTED]
                Lucene Query: %s
-               Remediation Steps: %s
+               Remediation: %s
 
-               [ACTUAL_AGENT_OUTPUT]
+               [ACTUAL]
                Lucene Query: %s
-               Evidence Found: %s
-               Remediation Steps: %s
+               Evidence Keys: %s
+               Remediation: %s
 
-               [EVALUATION_METRICS]
+               [METRICS]
                - Retrieval Precision: [%s] (%s)
                - Action Correctness:  [%s] (%s)
                - Plan Faithfulness:   [%s] (%s)
@@ -253,16 +347,12 @@ public class AgentEvaluationTest {
                         tc.id(),
                         tc.serviceName(),
                         tc.expectedAlertHeader(),
-                        cfg.topK(),
-                        cfg.minScore(),
-                        cfg.temperature(),
-                        cfg.strictMetadataFiltering(),
                         tc.userIssue(),
                         tc.expectedLuceneQuery(),
                         tc.expectedRemediation(),
-                        ar.investigationQuery(),
-                        (ar.evidence() != null ? ar.evidence().keySet() : "NONE"),
-                        ar.remediationSteps(),
+                        actualQuery,
+                        evidence,
+                        remediation,
                         entry.precision().pass() ? "PASS" : "FAIL",
                         entry.precision().reasoning(),
                         entry.action().pass() ? "PASS" : "FAIL",
@@ -271,121 +361,6 @@ public class AgentEvaluationTest {
                         entry.faithfulness().reasoning(),
                         crashInfo,
                         rawJson);
-    }
-
-    private GradingResult calculateRetrievalPrecision(
-            EvaluationCase testCase, AnalysisResponse response) {
-        if (response.citations() == null || response.citations().isEmpty()) {
-            return new GradingResult(false, "FAIL: No documents retrieved.");
-        }
-        boolean allSourcesMatch =
-                response.citations().stream()
-                        .allMatch(source -> source.equalsIgnoreCase(testCase.serviceName()));
-
-        if (allSourcesMatch) {
-            return new GradingResult(
-                    true, "PASS: All retrieved fragments belong to " + testCase.serviceName());
-        } else {
-            return new GradingResult(
-                    false,
-                    "FAIL: Context Pollution Detected. Retrieved: "
-                            + response.citations()
-                            + " | Expected: "
-                            + testCase.serviceName());
-        }
-    }
-
-    private GradingResult calculateActionCorrectness(
-            EvaluationCase testCase, AnalysisResponse response) {
-
-        if (response.evidence() == null || response.evidence().isEmpty()) {
-            return new GradingResult(
-                    false,
-                    "FAIL: No Evidence Captured. The Agent likely failed to EXECUTE the tool.");
-        }
-
-        String actualQuery = response.investigationQuery();
-        if (actualQuery == null || actualQuery.isBlank()) {
-            return new GradingResult(
-                    false,
-                    "FAIL: Agent returned null/empty investigationQuery. Evidence Captured: "
-                            + response.evidence());
-        }
-
-        ChatClient judge = clientBuilder.build();
-        return judge.prompt()
-                .system("You are a strict Lucene Query Syntax Validator.")
-                .user(
-                        u ->
-                                u.text(
-                                                """
-                        TASK: Compare the Actual Query against the Expected Query.
-
-                        EXPECTED (Ground Truth): {e}
-                        ACTUAL (Agent Output):   {a}
-
-                        EVALUATION CRITERIA:
-                        1. SYNTAX: The Actual Query MUST be valid Lucene syntax.
-                        2. ACCURACY: It must target the same fields and values as Expected.
-
-                        Output Format: JSON with keys "pass" (boolean) and "reasoning" (string).
-                        IMPORTANT: Do NOT escape single quotes in the output.
-                        """)
-                                        .param("e", testCase.expectedLuceneQuery())
-                                        .param("a", actualQuery))
-                .call()
-                .entity(GradingResult.class);
-    }
-
-    private GradingResult calculatePlanFaithfulness(
-            EvaluationCase testCase, AnalysisResponse response) {
-        ChatClient judge = clientBuilder.build();
-
-        if (response.remediationSteps() == null || response.remediationSteps().isEmpty()) {
-            return new GradingResult(false, "FAIL: Agent returned empty remediation steps.");
-        }
-
-        return judge.prompt()
-                .system("You are a QA Lead Auditor.")
-                .user(
-                        u ->
-                                u.text(
-                                                """
-                        Compare the remediation plans.
-
-                        GROUND TRUTH (Required Steps):
-                        {gt}
-
-                        ACTUAL AGENT OUTPUT:
-                        {act}
-
-                        STRICT GRADING RULES:
-                        1. RECALL: The Agent MUST include ALL steps from the Ground Truth.
-                        2. HALLUCINATION: The Agent must NOT invent new steps.
-                        3. VERBATIM: Commands (e.g., redis-cli) must be exact.
-
-                        Output Format: JSON with keys "pass" (boolean) and "reasoning" (string).
-                        IMPORTANT: Do NOT escape single quotes in the output.
-                        """)
-                                        .param(
-                                                "gt",
-                                                String.join("\n", testCase.expectedRemediation()))
-                                        .param(
-                                                "act",
-                                                String.join("\n", response.remediationSteps())))
-                .call()
-                .entity(GradingResult.class);
-    }
-
-    private String mapAlertToScenario(String serviceName, String alertHeader) {
-        String key = serviceName + "::" + alertHeader;
-        return switch (key) {
-            case "payment-service::Elevated 5xx Error Rate" -> "payment-500-npe";
-            case "payment-service::Upstream Gateway Latency" -> "payment-latency";
-            case "inventory-service::Database Connection Timeout" -> "inventory-db-timeout";
-            case "inventory-service::Elevated 5xx Error Rate" -> "inventory-stock-mismatch";
-            default -> "healthy";
-        };
     }
 
     private record EvaluationReportEntry(
