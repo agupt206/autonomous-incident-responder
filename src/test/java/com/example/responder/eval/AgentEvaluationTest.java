@@ -63,6 +63,7 @@ public class AgentEvaluationTest {
                                                 StandardCharsets.UTF_8);
                                 String serviceName =
                                         resource.getFilename().replace(".md", "").toLowerCase();
+
                                 return datasetGenerator
                                         .generateTestCases(content, serviceName)
                                         .stream();
@@ -155,7 +156,10 @@ public class AgentEvaluationTest {
         }
 
         ChatClient judge = clientBuilder.build();
-        // NOTE: Double escaped curly braces \\{ and \\} to avoid PromptTemplate errors
+
+        // FIX: Define the JSON format as a variable to avoid template parsing errors
+        String jsonFormat = "{ \"pass\": boolean, \"reasoning\": \"string\" }";
+
         return judge.prompt()
                 .system(
                         "You are a Search Query Syntax Expert. Compare two queries for SEMANTIC"
@@ -173,10 +177,11 @@ public class AgentEvaluationTest {
                         - Ignore field aliases IF they are common conventions (e.g. 'app' vs 'service').
                         - The LOGIC (AND/OR) and VALUES must match.
 
-                        Respond with valid JSON: \\{ "pass": boolean, "reasoning": "string" \\}
+                        Respond with valid JSON: {jsonFormat}
                         """)
                                         .param("expected", expectedQuery)
-                                        .param("actual", actualQuery))
+                                        .param("actual", actualQuery)
+                                        .param("jsonFormat", jsonFormat)) // Pass the schema here
                 .call()
                 .entity(GradingResult.class);
     }
@@ -188,6 +193,9 @@ public class AgentEvaluationTest {
 
         String expectedStr = String.join("\n", expectedSteps);
         String actualStr = String.join("\n", actualSteps);
+
+        // FIX: Define the JSON format as a variable
+        String jsonFormat = "{ \"pass\": boolean, \"reasoning\": \"string\" }";
 
         ChatClient judge = clientBuilder.build();
         return judge.prompt()
@@ -210,10 +218,11 @@ public class AgentEvaluationTest {
                         2. It is acceptable if the Agent rephrases steps, provided the meaning is preserved.
                         3. Fail ONLY if a critical step (e.g. "Flush Redis", "Restart Pod") is completely missing or wrong.
 
-                        Respond with valid JSON: \\{ "pass": boolean, "reasoning": "string" \\}
+                        Respond with valid JSON: {jsonFormat}
                         """)
                                         .param("expected", expectedStr)
-                                        .param("actual", actualStr))
+                                        .param("actual", actualStr)
+                                        .param("jsonFormat", jsonFormat)) // Pass the schema here
                 .call()
                 .entity(GradingResult.class);
     }

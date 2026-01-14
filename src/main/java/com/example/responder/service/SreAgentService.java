@@ -8,6 +8,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,6 +28,8 @@ public class SreAgentService {
 
     private static final Logger log = LoggerFactory.getLogger(SreAgentService.class);
     private static final int MAX_ITERATIONS = 5;
+    // Regex to capture content between the first { and last } across newlines
+    private static final Pattern JSON_BLOCK_PATTERN = Pattern.compile("(?s)\\{.*\\}");
 
     private final ChatClient chatClient;
     private final VectorStore vectorStore;
@@ -45,7 +49,7 @@ public class SreAgentService {
     public AnalysisResponse analyze(IncidentRequest request, AgentConfig config) {
         log.info(">>> RE-ACT AGENT START: Analyzing '{}'", request.issue());
 
-        // --- 1. RETRIEVAL (RAG) ---
+        // --- 1. RETRIEVAL (RAG) WITH ROBUST FILTERING ---
         List<Document> relevantDocs = retrieveContext(request, config);
 
         if (relevantDocs.isEmpty()) {
@@ -53,7 +57,6 @@ public class SreAgentService {
                     "No relevant runbooks found for service: " + request.serviceName());
         }
 
-        // Capture citations for evidence/debugging
         List<String> citations =
                 relevantDocs.stream()
                         .map(
@@ -64,7 +67,6 @@ public class SreAgentService {
                         .distinct()
                         .toList();
 
-        // Format Context
         String runbookContext =
                 relevantDocs.stream()
                         .map(
@@ -85,24 +87,24 @@ public class SreAgentService {
             You must alternate between THOUGHT, ACTION, and OBSERVATION.
 
             1. **THOUGHT**: Analyze the User Issue against the Runbook Context.
-               - Identify the specific Alert block that matches the issue.
-               - CHECK: Does the runbook specify a threshold (e.g. latency > 5000)? You MUST use that exact number.
+               - **CRITICAL**: First, identify the exact "## Alert: ..." header in the context that matches the issue.
+               - Quote the Alert Name in your thought.
+               - If multiple alerts are present, pick the ONE that best matches the user's symptoms.
 
             2. **ACTION**: Call a tool if you need more information.
-               - Available Tools: [healthCheck, searchElfLogs]
                - `healthCheck(service)`: Returns 'UP' or 'DOWN'.
                - `searchElfLogs(luceneQuery)`: Returns log counts and samples.
-               - **CRITICAL**: When using `searchElfLogs`, copy the Lucene query syntax EXACTLY from the runbook. Do not change fields (e.g. do not swap 'service' for 'application.name').
+               - **CRITICAL**: When using `searchElfLogs`, copy the Lucene query syntax EXACTLY from the chosen Alert section.
 
-            3. **OBSERVATION**: The tool output will be provided to you. Read it.
+            3. **OBSERVATION**: The tool output will be provided to you.
 
             **TERMINATION**
-            When you have gathered enough evidence, or if the runbook instructions are clear (e.g. "If X, then Y"), you must STOP and output the Final Report.
+            When you have gathered enough evidence, or if the runbook instructions are clear, you must STOP and output the Final Report.
 
             **FINAL OUTPUT FORMAT**
-            You must output a valid JSON object matching this structure exactly (no markdown formatting around it):
+            Output ONLY the raw JSON object (no markdown, no conversational text):
             {
-              "failureType": "String",
+              "failureType": "String (The Name of the Alert you identified)",
               "rootCauseHypothesis": "String",
               "investigationQuery": "String (The exact Lucene query used)",
               "evidence": { "tool_name": "result_summary" },
@@ -110,11 +112,6 @@ public class SreAgentService {
               "remediationSteps": [ "Step 1", "Step 2" ],
               "requiresEscalation": boolean
             }
-
-            **CONSTRAINT: REMEDIATION STEPS**
-            - You must extract steps VERBATIM from the runbook.
-            - If the runbook says "Flush Redis", do not write "Clear cache".
-            - Include ALL steps listed in the remediation section.
             """;
 
         conversationHistory.add(new SystemMessage(systemPrompt));
@@ -122,29 +119,24 @@ public class SreAgentService {
                 new UserMessage(
                         "CONTEXT:\n" + runbookContext + "\n\nUSER ISSUE: " + request.issue()));
 
-        AnalysisResponse finalResponse = null;
-
         // --- 3. EXECUTION LOOP ---
         for (int i = 0; i < MAX_ITERATIONS; i++) {
             log.debug("--- Turn {}/{} ---", i + 1, MAX_ITERATIONS);
 
-            // Call LLM with Tools enabled
-            ChatResponse response =
+            var response =
                     chatClient
                             .prompt()
                             .messages(conversationHistory)
-                            .functions("healthCheck", "searchElfLogs")
+                            .tools("healthCheck", "searchElfLogs")
                             .call()
                             .chatResponse();
 
-            Message assistantMessage = response.getResult().getOutput();
+            var assistantMessage = response.getResult().getOutput();
             conversationHistory.add(assistantMessage);
 
             String content = assistantMessage.getText();
 
-            // FIX 1: HANDLE NULL CONTENT (Tool Calls)
-            // If the model calls a tool, content is often null. We must continue to let Spring AI
-            // execute the tool.
+            // Handle Tool Calls (content is null/empty)
             if (content == null || content.isBlank()) {
                 log.debug("Agent generated Tool Call. Continuing loop...");
                 continue;
@@ -152,22 +144,25 @@ public class SreAgentService {
 
             log.debug("Agent Output: {}", content);
 
-            // Heuristic: Is this the Final JSON?
-            if (content.trim().startsWith("{") && content.trim().endsWith("}")) {
+            // FIX: Robust JSON Extraction
+            String potentialJson = extractJson(content);
+            if (potentialJson != null) {
                 try {
-                    finalResponse = objectMapper.readValue(content, AnalysisResponse.class);
+                    AnalysisResponse partial =
+                            objectMapper.readValue(potentialJson, AnalysisResponse.class);
                     // Inject citations and return
                     return new AnalysisResponse(
-                            finalResponse.failureType(),
-                            finalResponse.rootCauseHypothesis(),
-                            finalResponse.investigationQuery(),
-                            finalResponse.evidence(),
-                            finalResponse.responsibleTeam(),
-                            finalResponse.remediationSteps(),
-                            finalResponse.requiresEscalation(),
+                            partial.failureType(),
+                            partial.rootCauseHypothesis(),
+                            partial.investigationQuery(),
+                            partial.evidence(),
+                            partial.responsibleTeam(),
+                            partial.remediationSteps(),
+                            partial.requiresEscalation(),
                             citations);
                 } catch (JsonProcessingException e) {
-                    log.warn("Failed to parse JSON response. Continuing loop...");
+                    log.warn("JSON Parse Error on detected block: {}", e.getMessage());
+                    // Don't return fallback yet; let the agent try again or loop continues
                 }
             }
         }
@@ -175,7 +170,7 @@ public class SreAgentService {
         return fallbackResponse(
                 "Agent exceeded max iterations ("
                         + MAX_ITERATIONS
-                        + ") without strictly formatting final JSON.");
+                        + ") without producing valid JSON.");
     }
 
     private List<Document> retrieveContext(IncidentRequest request, AgentConfig config) {
@@ -185,7 +180,7 @@ public class SreAgentService {
             requestBuilder.similarityThreshold(config.minScore());
         }
 
-        // Attempt Vector Store Filter (May be ignored by some stores if not strictly configured)
+        // 1. Database-level filtering (Best effort)
         if (config.strictMetadataFiltering()) {
             String serviceKey = request.serviceName().toLowerCase().trim().replace(" ", "-");
             requestBuilder.filterExpression("service_name == '" + serviceKey + "'");
@@ -193,21 +188,29 @@ public class SreAgentService {
 
         List<Document> rawDocs = vectorStore.similaritySearch(requestBuilder.build());
 
-        // POST-RETRIEVAL FILTERING (Belt and Suspenders)
-        //        if (config.strictMetadataFiltering()) {
-        //            String targetService = request.serviceName().toLowerCase().trim().replace(" ",
-        // "-");
-        //
-        //            return rawDocs.stream()
-        //                    .filter(doc -> {
-        //                        String docService = doc.getMetadata().getOrDefault("service_name",
-        // "").toString();
-        //                        return docService.equals(targetService);
-        //                    })
-        //                    .collect(Collectors.toList());
-        //        }
+        // 2. Application-level filtering (Guaranteed Precision)
+        if (config.strictMetadataFiltering()) {
+            String targetService = request.serviceName().toLowerCase().trim().replace(" ", "-");
+            return rawDocs.stream()
+                    .filter(
+                            doc -> {
+                                Object metaVal = doc.getMetadata().get("service_name");
+                                return metaVal != null && metaVal.toString().equals(targetService);
+                            })
+                    .collect(Collectors.toList());
+        }
 
         return rawDocs;
+    }
+
+    /** Extracts the first outer JSON object {...} from a string, handling markdown and newlines. */
+    private String extractJson(String content) {
+        if (content == null) return null;
+        Matcher matcher = JSON_BLOCK_PATTERN.matcher(content);
+        if (matcher.find()) {
+            return matcher.group();
+        }
+        return null;
     }
 
     private AnalysisResponse fallbackResponse(String reason) {
