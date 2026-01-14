@@ -40,7 +40,9 @@ public class IngestionService implements CommandLineRunner {
 
             // 2. Manual Split by Horizontal Rule (--- or ----)
             // This guarantees we only split where YOU decided to split in the markdown
-            String[] rawChunks = content.split("(?m)^-{3,}");
+            // String[] rawChunks = content.split("(?m)^-{3,}");
+
+            String[] rawChunks = content.split("(?m)^(?=## Alert:)");
 
             List<Document> processedDocuments = new ArrayList<>();
 
