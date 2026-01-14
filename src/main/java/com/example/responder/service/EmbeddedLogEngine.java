@@ -5,7 +5,7 @@ import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import org.apache.lucene.analysis.core.WhitespaceAnalyzer;
+import org.apache.lucene.analysis.standard.StandardAnalyzer; // UPDATED IMPORT
 import org.apache.lucene.document.*;
 import org.apache.lucene.index.*;
 import org.apache.lucene.queryparser.classic.QueryParser;
@@ -21,12 +21,13 @@ public class EmbeddedLogEngine {
 
     private static final Logger log = LoggerFactory.getLogger(EmbeddedLogEngine.class);
     private Directory memoryIndex;
-    private WhitespaceAnalyzer analyzer;
+    private StandardAnalyzer analyzer; // UPDATED TYPE
 
     @PostConstruct
     public void init() throws IOException {
         memoryIndex = new ByteBuffersDirectory();
-        analyzer = new WhitespaceAnalyzer();
+        // UPDATED: Use StandardAnalyzer for robust, case-insensitive, punctuation-aware search
+        analyzer = new StandardAnalyzer();
         // Start with a healthy state
         loadScenario("healthy");
     }
@@ -43,13 +44,15 @@ public class EmbeddedLogEngine {
                 case "inventory-db-timeout" -> seedInventoryDbTimeout(writer);
                 case "inventory-stock-mismatch" -> seedInventoryStockMismatch(writer);
 
-                    // NEW SCENARIOS
+                // NEW SCENARIOS
                 case "inventory-cache-inconsistency" -> seedInventoryCacheInconsistency(writer);
                 case "payment-gateway-timeout" -> seedPaymentGatewayTimeout(writer);
 
                 default -> log.warn("Unknown scenario '{}', leaving index empty.", scenarioName);
             }
             writer.commit();
+
+            debugDumpAllLogs().forEach(System.out::println);
         } catch (IOException e) {
             log.error("Failed to load scenario", e);
         }
@@ -226,5 +229,40 @@ public class EmbeddedLogEngine {
             return new ElfLogSearchTool.Response(
                     0, List.of(), List.of(), "Query Error: " + e.getMessage());
         }
+    }
+
+    /**
+     * DEBUG TOOL: Returns a raw dump of all logs currently in the index.
+     * Useful for verifying seed data and schema fields.
+     */
+    public List<String> debugDumpAllLogs() {
+        List<String> debugOutput = new ArrayList<>();
+        try (IndexReader reader = DirectoryReader.open(memoryIndex)) {
+            IndexSearcher searcher = new IndexSearcher(reader);
+
+            // MatchAllDocsQuery retrieves every single document in the index
+            Query query = new MatchAllDocsQuery();
+            // Fetch up to 1000 logs for debugging
+            TopDocs docs = searcher.search(query, 1000);
+
+            debugOutput.add(">>> INDEX DUMP: Total Documents Indexed: " + docs.totalHits.value);
+
+            for (ScoreDoc scoreDoc : docs.scoreDocs) {
+                Document d = searcher.doc(scoreDoc.doc);
+                // Format the output to show the most critical fields
+                String logEntry = String.format(
+                        "Trace: [%s] | App: [%s] | Status: [%s] | Msg: %s",
+                        d.get("trace_id"),
+                        d.get("application.name"),
+                        d.get("status_code"),
+                        d.get("log.message")
+                );
+                debugOutput.add(logEntry);
+            }
+        } catch (IOException e) {
+            log.error("Failed to dump logs for debugging", e);
+            debugOutput.add("ERROR: Could not read index: " + e.getMessage());
+        }
+        return debugOutput;
     }
 }
