@@ -1,0 +1,410 @@
+BENCHMARK EXPERIMENT REPORT
+Timestamp: 20260113_190706
+Total Cases: 6
+Crashes: 1
+
+=== TEST CASE: inventory-service-001 ===
+SERVICE: inventory-service
+SCENARIO: Database Connection Timeout
+
+[INPUT]
+User Query: Can't connect to inventory system. Everything seems stuck!
+
+[EXPECTED]
+Lucene Query: application.name:'inventory-service' AND log.message:'Connection check failed' AND db.type:postgres
+Remediation: [Call healthCheck for inventory-service to determine if the service is completely down., Query logs for the specific error pattern: HikariPool-1 - Connection is not available., Scenario A (Pool Exhaustion): If log matches > 50 in the last 5 minutes, this is a connection leak. Action: Restart the inventory-service pods to clear the pool., Scenario B (Network): If logs show SocketTimeoutException connecting to inv-db-prod, verify if the database is in maintenance mode., If the database is reachable but latency is high, Escalate to the Database Reliability Team (Slack: #dba-urgent).]
+
+[ACTUAL]
+Lucene Query: application.name:"inventory-service" AND log.message:"Connection check failed" AND db.type:postgres
+Evidence Keys: [healthCheck, searchElfLogs]
+Remediation: [Restart the inventory-service pods to clear the connection pool, Investigate potential connection leaks in the database connection management]
+
+[METRICS]
+- Retrieval Precision: [PASS] (PASS: All retrieved fragments belong to inventory-service)
+- Action Correctness:  [PASS] (Queries are semantically equivalent. Both use single field matching with AND logic, identical field names, and matching values. Only difference is quote style, which does not impact semantic meaning.)
+- Plan Faithfulness:   [FAIL] (Agent's plan is incomplete. Missing critical steps: (1) Initial healthCheck for inventory-service, (2) Log querying for specific error pattern, (3) Scenario A/B decision logic, (4) Escalation to Database Reliability Team if database latency is high. The agent only partially addressed connection management without the full diagnostic workflow.)
+
+[RAW_DATA_JSON]
+{
+  "failureType" : "Database Connection Timeout",
+  "rootCauseHypothesis" : "Connection pool exhaustion in the inventory-service, causing database connectivity issues",
+  "investigationQuery" : "application.name:\"inventory-service\" AND log.message:\"Connection check failed\" AND db.type:postgres",
+  "evidence" : {
+    "healthCheck" : "UP",
+    "searchElfLogs" : {
+      "connectionFailures" : 15,
+      "connectionPoolErrors" : 15,
+      "affectedPods" : [ "simulated-pod-1", "simulated-pod-2" ]
+    }
+  },
+  "responsibleTeam" : "Inventory Service Team",
+  "remediationSteps" : [ "Restart the inventory-service pods to clear the connection pool", "Investigate potential connection leaks in the database connection management" ],
+  "requiresEscalation" : true,
+  "citations" : [ "inventory-service" ]
+}
+========================
+
+=== TEST CASE: inventory-service-002 ===
+SERVICE: inventory-service
+SCENARIO: Elevated 5xx Error Rate
+
+[INPUT]
+User Query: Website keeps showing server errors when trying to check product availability
+
+[EXPECTED]
+Lucene Query: application.name:'inventory-service' AND status_code:[500 TO 599] AND log.level:ERROR
+Remediation: [Check if a deployment occurred in the last 30 minutes. If YES, recommended action is to Rollback., Query logs for the specific business exception: StockCountMismatchException., If Mismatch Found: Do not page on-call. Trigger the automated job: Jenkins / Inventory / Reconcile-Stock., If NullPointerException: This indicates a code bug. Escalate to Supply Chain Engineering immediately., If the healthCheck returns 'UP' but errors persist > 5%, assume a downstream dependency failure (e.g., Warehouse API).]
+
+[ACTUAL]
+Lucene Query: application.name:"inventory-service" AND status_code:[500 TO 599] AND log.level:ERROR
+Evidence Keys: [healthCheck, elfLogs]
+Remediation: [Verify downstream dependencies like Warehouse API, Check recent deployments for potential issues, Escalate to Supply Chain Engineering for further investigation]
+
+[METRICS]
+- Retrieval Precision: [PASS] (PASS: All retrieved fragments belong to inventory-service)
+- Action Correctness:  [PASS] (Queries are semantically equivalent. Only difference is quote style, which does not impact query semantics. All field names, values, and logical operators remain identical.)
+- Plan Faithfulness:   [FAIL] (Agent's plan is missing critical steps: 1) Specific log query for StockCountMismatchException, 2) Conditional logic for NullPointerException escalation, 3) Specific Jenkins job trigger for stock reconciliation, 4) Deployment rollback check within last 30 minutes, 5) Precise health check percentage threshold evaluation)
+
+[RAW_DATA_JSON]
+{
+  "failureType" : "Elevated 5xx Error Rate",
+  "rootCauseHypothesis" : "Potential downstream dependency failure or intermittent service issue",
+  "investigationQuery" : "application.name:\"inventory-service\" AND status_code:[500 TO 599] AND log.level:ERROR",
+  "evidence" : {
+    "healthCheck" : "Service is UP",
+    "elfLogs" : "No 5xx errors found in the last hour"
+  },
+  "responsibleTeam" : "Supply Chain Engineering",
+  "remediationSteps" : [ "Verify downstream dependencies like Warehouse API", "Check recent deployments for potential issues", "Escalate to Supply Chain Engineering for further investigation" ],
+  "requiresEscalation" : true,
+  "citations" : [ "inventory-service" ]
+}
+========================
+
+=== TEST CASE: inventory-service-003 ===
+SERVICE: inventory-service
+SCENARIO: Cache Inconsistency
+
+[INPUT]
+User Query: Product quantities look wrong. Not showing latest stock levels
+
+[EXPECTED]
+Lucene Query: application.name:'inventory-service' AND log.message:'Cache key miss' AND db.status:'UP'
+Remediation: [Verify Database is healthy using healthCheck tool., If Database is UP but users see old data, flush the Redis cache., Command: redis-cli -h inv-cache-prod FLUSHALL., Restart the inventory-service to repopulate local caffeine caches.]
+
+[ACTUAL]
+Lucene Query: NULL
+Evidence Keys: NONE
+Remediation: NULL
+
+[METRICS]
+- Retrieval Precision: [FAIL] (N/A - Test Crashed)
+- Action Correctness:  [FAIL] (N/A - Test Crashed)
+- Plan Faithfulness:   [FAIL] (N/A - Test Crashed)
+
+[CRITICAL FAILURE]
+Exception: Functional bean with name searchELFLogs does not exist in the context.
+java.lang.IllegalArgumentException: Functional bean with name searchELFLogs does not exist in the context.
+	at org.springframework.ai.tool.resolution.TypeResolverHelper.getBeanDefinition(TypeResolverHelper.java:146)
+	at org.springframework.ai.tool.resolution.TypeResolverHelper.resolveBeanType(TypeResolverHelper.java:124)
+	at org.springframework.ai.tool.resolution.SpringBeanToolCallbackResolver.resolve(SpringBeanToolCallbackResolver.java:90)
+	at org.springframework.ai.tool.resolution.SpringBeanToolCallbackResolver.resolve(SpringBeanToolCallbackResolver.java:58)
+	at org.springframework.ai.tool.resolution.DelegatingToolCallbackResolver.resolve(DelegatingToolCallbackResolver.java:48)
+	at org.springframework.ai.model.tool.DefaultToolCallingManager.lambda$executeToolCall$4(DefaultToolCallingManager.java:205)
+	at java.base/java.util.Optional.orElseGet(Optional.java:364)
+	at org.springframework.ai.model.tool.DefaultToolCallingManager.executeToolCall(DefaultToolCallingManager.java:205)
+	at org.springframework.ai.model.tool.DefaultToolCallingManager.executeToolCalls(DefaultToolCallingManager.java:138)
+	at org.springframework.ai.anthropic.AnthropicChatModel.internalCall(AnthropicChatModel.java:294)
+	at org.springframework.ai.anthropic.AnthropicChatModel.internalCall(AnthropicChatModel.java:304)
+	at org.springframework.ai.anthropic.AnthropicChatModel.call(AnthropicChatModel.java:259)
+	at org.springframework.ai.chat.client.DefaultChatClient$DefaultChatClientRequestSpec$1.aroundCall(DefaultChatClient.java:680)
+	at org.springframework.ai.chat.client.advisor.DefaultAroundAdvisorChain.lambda$nextAroundCall$1(DefaultAroundAdvisorChain.java:98)
+	at io.micrometer.observation.Observation.observe(Observation.java:565)
+	at org.springframework.ai.chat.client.advisor.DefaultAroundAdvisorChain.nextAroundCall(DefaultAroundAdvisorChain.java:98)
+	at org.springframework.ai.chat.client.DefaultChatClient$DefaultCallResponseSpec.doGetChatResponse(DefaultChatClient.java:493)
+	at org.springframework.ai.chat.client.DefaultChatClient$DefaultCallResponseSpec.lambda$doGetObservableChatResponse$1(DefaultChatClient.java:482)
+	at io.micrometer.observation.Observation.observe(Observation.java:565)
+	at org.springframework.ai.chat.client.DefaultChatClient$DefaultCallResponseSpec.doGetObservableChatResponse(DefaultChatClient.java:482)
+	at org.springframework.ai.chat.client.DefaultChatClient$DefaultCallResponseSpec.doGetChatResponse(DefaultChatClient.java:466)
+	at org.springframework.ai.chat.client.DefaultChatClient$DefaultCallResponseSpec.chatResponse(DefaultChatClient.java:510)
+	at com.example.responder.service.SreAgentService.analyze(SreAgentService.java:132)
+	at com.example.responder.AgentEvaluationTest.evaluateAgentQuality(AgentEvaluationTest.java:101)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
+	at org.junit.platform.commons.util.ReflectionUtils.invokeMethod(ReflectionUtils.java:767)
+	at org.junit.jupiter.engine.execution.MethodInvocation.proceed(MethodInvocation.java:60)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$ValidatingInvocation.proceed(InvocationInterceptorChain.java:131)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.intercept(TimeoutExtension.java:156)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestableMethod(TimeoutExtension.java:147)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestTemplateMethod(TimeoutExtension.java:94)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker$ReflectiveInterceptorCall.lambda$ofVoidMethod$0(InterceptingExecutableInvoker.java:103)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.lambda$invoke$0(InterceptingExecutableInvoker.java:93)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$InterceptedInvocation.proceed(InvocationInterceptorChain.java:106)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.proceed(InvocationInterceptorChain.java:64)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.chainAndInvoke(InvocationInterceptorChain.java:45)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.invoke(InvocationInterceptorChain.java:37)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:92)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:86)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.lambda$invokeTestMethod$8(TestMethodTestDescriptor.java:217)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.invokeTestMethod(TestMethodTestDescriptor.java:213)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:138)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:68)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:156)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.submit(SameThreadHierarchicalTestExecutorService.java:35)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask$DefaultDynamicTestExecutor.execute(NodeTestTask.java:231)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask$DefaultDynamicTestExecutor.execute(NodeTestTask.java:209)
+	at org.junit.jupiter.engine.descriptor.TestTemplateTestDescriptor.execute(TestTemplateTestDescriptor.java:141)
+	at org.junit.jupiter.engine.descriptor.TestTemplateTestDescriptor.lambda$execute$3(TestTemplateTestDescriptor.java:109)
+	at java.base/java.util.stream.ForEachOps$ForEachOp$OfRef.accept(ForEachOps.java:183)
+	at java.base/java.util.stream.ReferencePipeline$3$1.accept(ReferencePipeline.java:197)
+	at java.base/java.util.stream.ReferencePipeline$2$1.accept(ReferencePipeline.java:179)
+	at java.base/java.util.stream.ReferencePipeline$3$1.accept(ReferencePipeline.java:197)
+	at java.base/java.util.stream.ForEachOps$ForEachOp$OfRef.accept(ForEachOps.java:183)
+	at java.base/java.util.stream.ReferencePipeline$3$1.accept(ReferencePipeline.java:197)
+	at java.base/java.util.stream.ForEachOps$ForEachOp$OfRef.accept(ForEachOps.java:183)
+	at java.base/java.util.stream.ForEachOps$ForEachOp$OfRef.accept(ForEachOps.java:183)
+	at java.base/java.util.stream.ReferencePipeline$3$1.accept(ReferencePipeline.java:197)
+	at java.base/java.util.stream.ForEachOps$ForEachOp$OfRef.accept(ForEachOps.java:183)
+	at java.base/java.util.ArrayList$ArrayListSpliterator.forEachRemaining(ArrayList.java:1625)
+	at java.base/java.util.stream.ReferencePipeline$Head.forEach(ReferencePipeline.java:762)
+	at java.base/java.util.stream.ReferencePipeline$7$1.accept(ReferencePipeline.java:276)
+	at java.base/java.util.Spliterators$ArraySpliterator.forEachRemaining(Spliterators.java:992)
+	at java.base/java.util.stream.AbstractPipeline.copyInto(AbstractPipeline.java:509)
+	at java.base/java.util.stream.AbstractPipeline.wrapAndCopyInto(AbstractPipeline.java:499)
+	at java.base/java.util.stream.ForEachOps$ForEachOp.evaluateSequential(ForEachOps.java:150)
+	at java.base/java.util.stream.ForEachOps$ForEachOp$OfRef.evaluateSequential(ForEachOps.java:173)
+	at java.base/java.util.stream.AbstractPipeline.evaluate(AbstractPipeline.java:234)
+	at java.base/java.util.stream.ReferencePipeline.forEach(ReferencePipeline.java:596)
+	at java.base/java.util.stream.ReferencePipeline$7$1.accept(ReferencePipeline.java:276)
+	at java.base/java.util.stream.ReferencePipeline$3$1.accept(ReferencePipeline.java:197)
+	at java.base/java.util.stream.ReferencePipeline$3$1.accept(ReferencePipeline.java:197)
+	at java.base/java.util.stream.ReferencePipeline$3$1.accept(ReferencePipeline.java:197)
+	at java.base/java.util.Spliterators$ArraySpliterator.forEachRemaining(Spliterators.java:992)
+	at java.base/java.util.stream.AbstractPipeline.copyInto(AbstractPipeline.java:509)
+	at java.base/java.util.stream.AbstractPipeline.wrapAndCopyInto(AbstractPipeline.java:499)
+	at java.base/java.util.stream.ForEachOps$ForEachOp.evaluateSequential(ForEachOps.java:150)
+	at java.base/java.util.stream.ForEachOps$ForEachOp$OfRef.evaluateSequential(ForEachOps.java:173)
+	at java.base/java.util.stream.AbstractPipeline.evaluate(AbstractPipeline.java:234)
+	at java.base/java.util.stream.ReferencePipeline.forEach(ReferencePipeline.java:596)
+	at java.base/java.util.stream.ReferencePipeline$7$1.accept(ReferencePipeline.java:276)
+	at java.base/java.util.ArrayList$ArrayListSpliterator.forEachRemaining(ArrayList.java:1625)
+	at java.base/java.util.stream.AbstractPipeline.copyInto(AbstractPipeline.java:509)
+	at java.base/java.util.stream.AbstractPipeline.wrapAndCopyInto(AbstractPipeline.java:499)
+	at java.base/java.util.stream.ForEachOps$ForEachOp.evaluateSequential(ForEachOps.java:150)
+	at java.base/java.util.stream.ForEachOps$ForEachOp$OfRef.evaluateSequential(ForEachOps.java:173)
+	at java.base/java.util.stream.AbstractPipeline.evaluate(AbstractPipeline.java:234)
+	at java.base/java.util.stream.ReferencePipeline.forEach(ReferencePipeline.java:596)
+	at java.base/java.util.stream.ReferencePipeline$7$1.accept(ReferencePipeline.java:276)
+	at java.base/java.util.stream.ReferencePipeline$3$1.accept(ReferencePipeline.java:197)
+	at java.base/java.util.stream.ReferencePipeline$3$1.accept(ReferencePipeline.java:197)
+	at java.base/java.util.stream.ReferencePipeline$3$1.accept(ReferencePipeline.java:197)
+	at java.base/java.util.ArrayList$ArrayListSpliterator.forEachRemaining(ArrayList.java:1625)
+	at java.base/java.util.stream.AbstractPipeline.copyInto(AbstractPipeline.java:509)
+	at java.base/java.util.stream.AbstractPipeline.wrapAndCopyInto(AbstractPipeline.java:499)
+	at java.base/java.util.stream.ForEachOps$ForEachOp.evaluateSequential(ForEachOps.java:150)
+	at java.base/java.util.stream.ForEachOps$ForEachOp$OfRef.evaluateSequential(ForEachOps.java:173)
+	at java.base/java.util.stream.AbstractPipeline.evaluate(AbstractPipeline.java:234)
+	at java.base/java.util.stream.ReferencePipeline.forEach(ReferencePipeline.java:596)
+	at java.base/java.util.stream.ReferencePipeline$7$1.accept(ReferencePipeline.java:276)
+	at java.base/java.util.ArrayList$ArrayListSpliterator.forEachRemaining(ArrayList.java:1625)
+	at java.base/java.util.stream.AbstractPipeline.copyInto(AbstractPipeline.java:509)
+	at java.base/java.util.stream.AbstractPipeline.wrapAndCopyInto(AbstractPipeline.java:499)
+	at java.base/java.util.stream.ForEachOps$ForEachOp.evaluateSequential(ForEachOps.java:150)
+	at java.base/java.util.stream.ForEachOps$ForEachOp$OfRef.evaluateSequential(ForEachOps.java:173)
+	at java.base/java.util.stream.AbstractPipeline.evaluate(AbstractPipeline.java:234)
+	at java.base/java.util.stream.ReferencePipeline.forEach(ReferencePipeline.java:596)
+	at org.junit.jupiter.engine.descriptor.TestTemplateTestDescriptor.execute(TestTemplateTestDescriptor.java:109)
+	at org.junit.jupiter.engine.descriptor.TestTemplateTestDescriptor.execute(TestTemplateTestDescriptor.java:43)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:156)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1511)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:41)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:160)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1511)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:41)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:160)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.submit(SameThreadHierarchicalTestExecutorService.java:35)
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestExecutor.execute(HierarchicalTestExecutor.java:57)
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestEngine.execute(HierarchicalTestEngine.java:54)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:198)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:169)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:93)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.lambda$execute$0(EngineExecutionOrchestrator.java:58)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.withInterceptedStreams(EngineExecutionOrchestrator.java:141)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:57)
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:103)
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:85)
+	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:47)
+	at org.gradle.api.internal.tasks.testing.junitplatform.JUnitPlatformTestClassProcessor$CollectAllTestClassesExecutor.processAllTestClasses(JUnitPlatformTestClassProcessor.java:135)
+	at org.gradle.api.internal.tasks.testing.junitplatform.JUnitPlatformTestClassProcessor$CollectAllTestClassesExecutor.access$000(JUnitPlatformTestClassProcessor.java:110)
+	at org.gradle.api.internal.tasks.testing.junitplatform.JUnitPlatformTestClassProcessor.stop(JUnitPlatformTestClassProcessor.java:104)
+	at org.gradle.api.internal.tasks.testing.SuiteTestClassProcessor.stop(SuiteTestClassProcessor.java:64)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
+	at org.gradle.internal.dispatch.MethodInvocation.invokeOn(MethodInvocation.java:77)
+	at org.gradle.internal.dispatch.ReflectionDispatch.dispatch(ReflectionDispatch.java:28)
+	at org.gradle.internal.dispatch.ReflectionDispatch.dispatch(ReflectionDispatch.java:19)
+	at org.gradle.internal.dispatch.ContextClassLoaderDispatch.dispatch(ContextClassLoaderDispatch.java:33)
+	at org.gradle.internal.dispatch.ProxyDispatchAdapter$DispatchingInvocationHandler.invoke(ProxyDispatchAdapter.java:88)
+	at jdk.proxy1/jdk.proxy1.$Proxy4.stop(Unknown Source)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker$3.run(TestWorker.java:194)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.executeAndMaintainThreadName(TestWorker.java:126)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.execute(TestWorker.java:103)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.execute(TestWorker.java:63)
+	at org.gradle.process.internal.worker.child.ActionExecutionWorker.execute(ActionExecutionWorker.java:56)
+	at org.gradle.process.internal.worker.child.SystemApplicationClassLoaderWorker.call(SystemApplicationClassLoaderWorker.java:122)
+	at org.gradle.process.internal.worker.child.SystemApplicationClassLoaderWorker.call(SystemApplicationClassLoaderWorker.java:72)
+	at worker.org.gradle.process.internal.worker.GradleWorkerMain.run(GradleWorkerMain.java:69)
+	at worker.org.gradle.process.internal.worker.GradleWorkerMain.main(GradleWorkerMain.java:74)
+
+
+[RAW_DATA_JSON]
+N/A
+========================
+
+=== TEST CASE: payment-service-001 ===
+SERVICE: payment-service
+SCENARIO: Elevated 5xx Error Rate
+
+[INPUT]
+User Query: Payments are failing and I can't complete my transaction!
+
+[EXPECTED]
+Lucene Query: type:opentracing-log AND log.level:ERROR AND application.name:'payment-service' AND status_code:[500 TO 599]
+Remediation: [Check the healthCheck tool for 'DOWN' status., If the service is 'UP', query the logs to identify the specific exception type., If the exception is PaymentDeclinedException, this is a valid business error; do not page., If the exception is NullPointerException, roll back the last deployment immediately.]
+
+[ACTUAL]
+Lucene Query: application.name:"payment-service" AND metric:latency AND value:{2000 TO *}
+Evidence Keys: [healthCheck, elfLogs]
+Remediation: [Escalate to Payment Service Team via Slack channel #payment-platform, Do not restart the payment service to prevent dropping active transactions]
+
+[METRICS]
+- Retrieval Precision: [PASS] (PASS: All retrieved fragments belong to payment-service)
+- Action Correctness:  [FAIL] (The queries have fundamentally different semantic intents. The EXPECTED QUERY focuses on error logs (type:opentracing-log, log.level:ERROR, status_code:[500 TO 599]), while the ACTUAL QUERY appears to be measuring performance metrics (metric:latency, value:{2000 TO *}) for the same application. While they share the 'application.name' field, their core search objectives are distinct.)
+- Plan Faithfulness:   [FAIL] (Agent's plan is missing critical steps: checking healthCheck tool status, querying logs, identifying exception type, and specific handling for PaymentDeclinedException and NullPointerException. The proposed actions do not align with the Ground Truth steps for troubleshooting.)
+
+[RAW_DATA_JSON]
+{
+  "failureType" : "Upstream Gateway Latency",
+  "rootCauseHypothesis" : "Potential upstream payment gateway connectivity or performance issue",
+  "investigationQuery" : "application.name:\"payment-service\" AND metric:latency AND value:{2000 TO *}",
+  "evidence" : {
+    "healthCheck" : "UP",
+    "elfLogs" : "No errors detected in logs"
+  },
+  "responsibleTeam" : "Payment Service Team",
+  "remediationSteps" : [ "Escalate to Payment Service Team via Slack channel #payment-platform", "Do not restart the payment service to prevent dropping active transactions" ],
+  "requiresEscalation" : true,
+  "citations" : [ "payment-service" ]
+}
+========================
+
+=== TEST CASE: payment-service-002 ===
+SERVICE: payment-service
+SCENARIO: Upstream Gateway Latency
+
+[INPUT]
+User Query: Transactions are taking forever to process!
+
+[EXPECTED]
+Lucene Query: application.name:'payment-service' AND metric:latency AND value:{2000 TO *}
+Remediation: [Check the healthCheck tool for 'DOWN' status., If health is UP, escalate to the Payment Service Team via Slack channel #payment-platform., Do not restart the payment service, as this will drop active transactions.]
+
+[ACTUAL]
+Lucene Query: application.name:"payment-service" AND metric:latency AND value:{2000 TO *}
+Evidence Keys: [healthCheck, searchElfLogs]
+Remediation: [Escalate to Payment Service Team via Slack channel #payment-platform, Do not restart the payment service to avoid dropping active transactions]
+
+[METRICS]
+- Retrieval Precision: [PASS] (PASS: All retrieved fragments belong to payment-service)
+- Action Correctness:  [PASS] (Queries are semantically equivalent. Only difference is quote style, which does not impact query semantics. All field names, values, and logical operators remain identical.)
+- Plan Faithfulness:   [FAIL] (Agent's plan is missing the critical first step of checking the healthCheck tool for 'DOWN' status. Without verifying the health status first, the escalation and other actions are premature.)
+
+[RAW_DATA_JSON]
+{
+  "failureType" : "Upstream Gateway Latency",
+  "rootCauseHypothesis" : "Payment service is experiencing high latency with transactions taking longer than 2000ms, indicating potential upstream gateway performance issues",
+  "investigationQuery" : "application.name:\"payment-service\" AND metric:latency AND value:{2000 TO *}",
+  "evidence" : {
+    "healthCheck" : "UP",
+    "searchElfLogs" : {
+      "matchCount" : 20,
+      "affectedPods" : [ "simulated-pod-1", "simulated-pod-2" ]
+    }
+  },
+  "responsibleTeam" : "Payment Service Team",
+  "remediationSteps" : [ "Escalate to Payment Service Team via Slack channel #payment-platform", "Do not restart the payment service to avoid dropping active transactions" ],
+  "requiresEscalation" : true,
+  "citations" : [ "payment-service" ]
+}
+========================
+
+=== TEST CASE: payment-service-003 ===
+SERVICE: payment-service
+SCENARIO: Gateway Timeout
+
+[INPUT]
+User Query: My payment is stuck and timing out!
+
+[EXPECTED]
+Lucene Query: application.name:'payment-service' AND status_code:504 AND metric:latency AND value:{5000 TO *}
+Remediation: [Check if the upstream provider (Stripe/PayPal) status page reports outages., If upstream is green, check internal firewall logs for dropped packets., Scale up the payment-gateway pods by 50% to handle retry storms.]
+
+[ACTUAL]
+Lucene Query: application.name:"payment-service" AND status_code:504 AND metric:latency AND value:{5000 TO *}
+Evidence Keys: [healthCheck, gatewayTimeoutLogs]
+Remediation: [Check Stripe/PayPal status page for upstream outages, Verify internal firewall logs for potential packet drops, Consider scaling up payment-gateway pods by 50%]
+
+[METRICS]
+- Retrieval Precision: [PASS] (PASS: All retrieved fragments belong to payment-service)
+- Action Correctness:  [PASS] (Queries are semantically equivalent. Only difference is quote style, which does not impact query semantics. All field names, values, and logical operators are identical.)
+- Plan Faithfulness:   [PASS] (Agent's steps match Ground Truth steps with equivalent meaning and cover all critical actions. Slight rephrasing is acceptable, and all key steps are preserved: checking upstream status, verifying firewall logs, and scaling payment gateway pods.)
+
+[RAW_DATA_JSON]
+{
+  "failureType" : "Gateway Timeout",
+  "rootCauseHypothesis" : "Potential upstream provider connectivity issue or intermittent network latency",
+  "investigationQuery" : "application.name:\"payment-service\" AND status_code:504 AND metric:latency AND value:{5000 TO *}",
+  "evidence" : {
+    "healthCheck" : "Service is UP",
+    "gatewayTimeoutLogs" : "No direct timeout logs found"
+  },
+  "responsibleTeam" : "Payment Service Team",
+  "remediationSteps" : [ "Check Stripe/PayPal status page for upstream outages", "Verify internal firewall logs for potential packet drops", "Consider scaling up payment-gateway pods by 50%" ],
+  "requiresEscalation" : true,
+  "citations" : [ "payment-service" ]
+}
+========================
+

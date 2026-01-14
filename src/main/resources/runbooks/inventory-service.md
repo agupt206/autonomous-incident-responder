@@ -6,7 +6,7 @@
 **Time Period:** 30 minutes
 **Query:**
 ```lucene
-service:"inventory-service" AND log.message:"Connection check failed" AND db.type:postgres
+application.name:"inventory-service" AND log.message:"Connection check failed" AND db.type:postgres
 ```  
 
 ## 2. Remediation
@@ -28,7 +28,7 @@ service:"inventory-service" AND log.message:"Connection check failed" AND db.typ
 **Time Period:** 1 hour
 **Query:**
 ```lucene
-service:"inventory-service" AND status_code:[500 TO 599] AND log.level:ERROR
+application.name:"inventory-service" AND status_code:[500 TO 599] AND log.level:ERROR
 ```   
 
 ### 2. Remediation
@@ -49,7 +49,7 @@ service:"inventory-service" AND status_code:[500 TO 599] AND log.level:ERROR
 **Time Period:** 15 minutes
 **Query:**
 ```lucene
-service:"inventory-service" AND log.message:"Cache key miss" AND db.status:"UP"
+application.name:"inventory-service" AND log.message:"Cache key miss" AND db.status:"UP"
 ``` 
 ### 2. Remediation
 **1. Verify Database is healthy using healthCheck tool.**

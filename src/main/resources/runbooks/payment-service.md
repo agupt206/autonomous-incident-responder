@@ -23,7 +23,7 @@ type:opentracing-log AND log.level:ERROR AND application.name:"payment-service" 
 ### 1. Detection Logic
 **Query:**
 ```lucene
-service:"payment-service" AND metric:latency AND value > 2000
+application.name:"payment-service" AND metric:latency AND value:{2000 TO *}
 ```   
 
 ### 2. Remediation
@@ -39,7 +39,7 @@ service:"payment-service" AND metric:latency AND value > 2000
 ### 1. Detection Logic
 **Query:**
 ```lucene
-service:"payment-service" AND status_code:504 AND metric:latency > 5000
+application.name:"payment-service" AND status_code:504 AND metric:latency AND value:{5000 TO *}
 ``` 
 
 ### 2. Remediation
